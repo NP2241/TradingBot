@@ -1,4 +1,4 @@
-import requests # odd intellij error, ignore since the file runs correctly
+import requests # Odd intellij error, file works though
 from datetime import datetime
 
 API_KEY = 'MQQMS2DV63VD3YDK'
@@ -19,7 +19,7 @@ def is_market_open():
 def main():
     symbol = input("Enter a stock symbol: ").upper()
     data = get_current_price(symbol)
-    if 'Global Quote' in data:
+    if 'Global Quote' in data and '05. price' in data['Global Quote']:
         price = data['Global Quote']['05. price']
         latest_trading_day = data['Global Quote']['07. latest trading day']
         print(f"The current price of {symbol} is: ${price} (as of {latest_trading_day})")
@@ -29,7 +29,7 @@ def main():
         else:
             print("The market is currently closed.")
     else:
-        print("Invalid symbol. ")
+        print("Invalid symbol.")
 
 if __name__ == "__main__":
     main()
