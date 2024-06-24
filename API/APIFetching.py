@@ -1,15 +1,13 @@
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 def get_current_price(symbol):
     try:
         stock = yf.Ticker(symbol)
-        eastern = pytz.timezone('US/Eastern')
-        now = datetime.now(eastern)
+        now = datetime.now(pytz.timezone('US/Eastern'))
 
         if is_market_open(now):
-            # Fetch intraday data with 1-minute intervals
             data = stock.history(period='1d', interval='1m')
             if not data.empty:
                 current_price = data['Close'].iloc[-1]
@@ -17,9 +15,9 @@ def get_current_price(symbol):
             else:
                 return None
         else:
-            # Fetch daily data for the last day
-            data = stock.history(period='1d')
+            data = stock.history(period='2d', interval='1d')
             if not data.empty:
+                # Get the closing price of the most recent trading day
                 closing_price = data['Close'].iloc[-1]
                 return closing_price
             else:
@@ -36,8 +34,7 @@ def is_market_open(current_time):
 def main():
     symbol = input("Enter a stock symbol: ").upper()
     price = get_current_price(symbol)
-    eastern = pytz.timezone('US/Eastern')
-    now = datetime.now(eastern)
+    now = datetime.now(pytz.timezone('US/Eastern'))
 
     if price is not None:
         if is_market_open(now):
