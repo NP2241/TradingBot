@@ -8,6 +8,7 @@ def track_price(symbol, interval='1m'):
     last_price = None
     eastern = pytz.timezone('US/Eastern')
     sleep_time = 3600 if interval == '1h' else 60  # Adjust sleep time based on interval
+    print(f"Starting real-time tracking for {symbol} with interval {interval}")
     while is_market_open():
         current_time = datetime.now(eastern)
         current_price = get_current_price(symbol)
@@ -17,6 +18,7 @@ def track_price(symbol, interval='1m'):
             data.append(record)
             print(record)
         time.sleep(sleep_time)  # Wait for the specified interval
+    print(f"Finished real-time tracking for {symbol} with interval {interval}")
     return data
 
 def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
@@ -29,6 +31,7 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
     else:
         end_date_dt = start_date_dt
 
+    print(f"Starting historical tracking for {symbol} from {start_date} to {end_date or start_date} with interval {interval}")
     current_date = start_date_dt
     while current_date <= end_date_dt:
         if current_date.weekday() >= 5:  # Skip weekends (Saturday and Sunday)
@@ -45,19 +48,28 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
                     last_price = price
                     record = (symbol, price, time_stamp.strftime('%H:%M:%S'), time_stamp.strftime('%Y-%m-%d'))
                     data.append(record)
-                    print(record)
+                    #print(record)
         current_date += timedelta(days=1)
+    print(f"Finished historical tracking for {symbol} from {start_date} to {end_date or start_date} with interval {interval}")
     return data
 
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) >= 5:
+    print(f"Arguments received: {sys.argv}")
+
+    if len(sys.argv) >= 6:
         symbol = sys.argv[1].upper()
         historical = sys.argv[2].strip().lower() == 'yes'
         start_date = sys.argv[3].strip()
+        end_date = sys.argv[4].strip() if len(sys.argv) == 6 else None
+        interval = sys.argv[5].strip()
+    elif len(sys.argv) == 5:
+        symbol = sys.argv[1].upper()
+        historical = sys.argv[2].strip().lower() == 'yes'
+        start_date = sys.argv[3].strip()
+        end_date = None
         interval = sys.argv[4].strip()
-        end_date = sys.argv[5].strip() if len(sys.argv) == 6 else None
     else:
         symbol = input("Enter a stock symbol: ").upper()
         historical = input("Do you want to check historical data? (yes/no): ").strip().lower() == 'yes'
@@ -71,6 +83,8 @@ if __name__ == "__main__":
             start_date = None
             end_date = None
             interval = input("Enter the interval (e.g., 1m, 1h): ").strip()  # Ask for interval
+
+    print(f"Processed arguments: {symbol}, {historical}, {start_date}, {end_date}, {interval}")
 
     if historical:
         data = track_historical_prices(symbol, start_date, end_date, interval)

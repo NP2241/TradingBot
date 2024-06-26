@@ -20,7 +20,7 @@ def create_database(db_path):
     conn.commit()
     conn.close()
 
-def populate_database(db_path, symbol, historical, start_date, end_date=None, interval='1h'):
+def populate_database(db_path, symbol, historical, start_date, interval, end_date=None):
     # Call priceTracker.py and capture its output
     command = [sys.executable, "priceTracker.py", symbol, "yes" if historical else "no", start_date]
     if end_date:
@@ -53,7 +53,7 @@ def populate_database(db_path, symbol, historical, start_date, end_date=None, in
 
     conn.close()
 
-def generate_db_filename(symbol, start_date, end_date=None, interval='1h'):
+def generate_db_filename(symbol, start_date, interval, end_date=None):
     interval_str = interval.replace(' ', '').replace(':', '').replace('-', '')
     if end_date:
         return f"{symbol}_{start_date.replace('-', '.')}_{end_date.replace('-', '.')}_{interval_str}.db"
@@ -94,17 +94,27 @@ def is_market_open():
     return market_open_time <= now <= market_close_time
 
 if __name__ == "__main__":
-    if len(sys.argv) < 5:
-        print("Usage: python setupDatabase.py <symbol> <yes|no> <start_date> <interval> [end_date]")
+    if len(sys.argv) < 4:
+        print("Usage: python setupDatabase.py <symbol> <yes|no> <start_date> [end_date] <interval>")
         sys.exit(1)
 
     symbol = sys.argv[1].upper()
     historical = sys.argv[2].strip().lower() == 'yes'
     start_date = sys.argv[3].strip()
-    interval = sys.argv[4].strip()
-    end_date = sys.argv[5].strip() if len(sys.argv) > 5 else None
 
-    db_filename = generate_db_filename(symbol, start_date, end_date, interval)
+    if len(sys.argv) == 5:
+        interval = sys.argv[4].strip()
+        end_date = None
+    elif len(sys.argv) == 6:
+        end_date = sys.argv[4].strip()
+        interval = sys.argv[5].strip()
+    else:
+        print("Usage: python setupDatabase.py <symbol> <yes|no> <start_date> [end_date] <interval>")
+        sys.exit(1)
+
+    print(f"{start_date}   {interval}   {end_date}")
+
+    db_filename = generate_db_filename(symbol, start_date, interval, end_date)
     db_path = os.path.abspath(f'../data/{db_filename}')
 
     create_database(db_path)
@@ -115,6 +125,6 @@ if __name__ == "__main__":
             sys.exit(1)
         populate_real_time_database(db_path, symbol, interval)
     else:
-        populate_database(db_path, symbol, historical, start_date, end_date, interval)
+        populate_database(db_path, symbol, historical, start_date, interval, end_date)
 
     print(f"Database saved at: {db_path}")
