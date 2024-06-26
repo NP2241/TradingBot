@@ -4,9 +4,22 @@ import os
 import time
 from datetime import datetime, timedelta
 import pytz
+from dotenv import load_dotenv
+
+def load_env():
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'paths.env'))
+    if not os.path.exists(env_path):
+        raise FileNotFoundError(f".env file not found at {env_path}")
+    load_dotenv(dotenv_path=env_path)
 
 def get_script_dir():
     return os.path.dirname(os.path.realpath(__file__))
+
+def get_root_dir():
+    root_dir = os.getenv('ROOT_DIR')
+    if not root_dir:
+        raise ValueError("ROOT_DIR environment variable not set.")
+    return root_dir
 
 def is_market_open():
     now = datetime.now(pytz.timezone('US/Eastern'))
@@ -16,19 +29,20 @@ def is_market_open():
     return market_open_time <= now <= market_close_time
 
 def delete_existing_db_files():
+    root_dir = get_root_dir()
     db_files = [
-        "/Users/neilpendyala/Documents/GitHub/TradingBot/data/AAPL_2024.06.24_1h.db",
-        "/Users/neilpendyala/Documents/GitHub/TradingBot/data/AAPL_2024.06.21_2024.06.24_1h.db"
+        os.path.join(root_dir, "data/AAPL_2024.06.24_1h.db"),
+        os.path.join(root_dir, "data/AAPL_2024.06.21_2024.06.24_1h.db")
     ]
     for db_file in db_files:
         if os.path.exists(db_file):
-            #print(f"Deleting existing database file: {db_file}")
+            print(f"\nDeleting existing database file: {db_file}")
             os.remove(db_file)
 
 def run_setup_database_single_day(print_all=False):
     python_path = sys.executable  # Use the current Python executable
-    script_dir = get_script_dir()
-    setup_database_path = os.path.join(script_dir, "setupDatabase.py")
+    root_dir = get_root_dir()
+    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
 
     command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-24", "1h"]
 
@@ -42,8 +56,8 @@ def run_setup_database_single_day(print_all=False):
 
 def run_setup_database_date_range(print_all=False):
     python_path = sys.executable  # Use the current Python executable
-    script_dir = get_script_dir()
-    setup_database_path = os.path.join(script_dir, "setupDatabase.py")
+    root_dir = get_root_dir()
+    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
 
     command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-21", "2024-06-24", "1h"]
 
@@ -61,8 +75,8 @@ def run_real_time_test(symbol="AAPL", interval="1m", duration_minutes=3):
         return
 
     python_path = sys.executable  # Use the current Python executable
-    script_dir = get_script_dir()
-    setup_database_path = os.path.join(script_dir, "setupDatabase.py")
+    root_dir = get_root_dir()
+    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
 
     command = [python_path, setup_database_path, symbol, "no", datetime.now().strftime('%Y-%m-%d'), interval]
 
@@ -91,6 +105,7 @@ def run_real_time_test(symbol="AAPL", interval="1m", duration_minutes=3):
         print(f"\nErrors:\n{stderr}")
 
 if __name__ == "__main__":
+    load_env()
     delete_existing_db_files()
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'all':
         run_setup_database_single_day(print_all=True)
