@@ -15,6 +15,16 @@ def is_market_open():
     market_close_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
     return market_open_time <= now <= market_close_time
 
+def delete_existing_db_files():
+    db_files = [
+        "/Users/neilpendyala/Documents/GitHub/TradingBot/data/AAPL_2024.06.24_1h.db",
+        "/Users/neilpendyala/Documents/GitHub/TradingBot/data/AAPL_2024.06.21_2024.06.24_1h.db"
+    ]
+    for db_file in db_files:
+        if os.path.exists(db_file):
+            #print(f"Deleting existing database file: {db_file}")
+            os.remove(db_file)
+
 def run_setup_database_single_day(print_all=False):
     python_path = sys.executable  # Use the current Python executable
     script_dir = get_script_dir()
@@ -47,7 +57,7 @@ def run_setup_database_date_range(print_all=False):
 
 def run_real_time_test(symbol="AAPL", interval="1m", duration_minutes=3):
     if not is_market_open():
-        print("\nCannot run the real-time test since the market is closed.")
+        print("\nCannot run the real-time test since the market is closed.\n")
         return
 
     python_path = sys.executable  # Use the current Python executable
@@ -81,6 +91,7 @@ def run_real_time_test(symbol="AAPL", interval="1m", duration_minutes=3):
         print(f"\nErrors:\n{stderr}")
 
 if __name__ == "__main__":
+    delete_existing_db_files()
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'all':
         run_setup_database_single_day(print_all=True)
         run_setup_database_date_range(print_all=True)
