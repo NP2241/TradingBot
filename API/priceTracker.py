@@ -5,19 +5,21 @@ from APIFetching import get_current_price, get_historical_prices, is_market_open
 
 def track_price(symbol, interval='1m'):
     data = []
-    last_price = None
     eastern = pytz.timezone('US/Eastern')
     sleep_time = 3600 if interval == '1h' else 60  # Adjust sleep time based on interval
     print(f"Starting real-time tracking for {symbol} with interval {interval}")
-    while is_market_open():
+
+    if is_market_open():
         current_time = datetime.now(eastern)
         current_price = get_current_price(symbol)
-        if current_price is not None and current_price != last_price:
-            last_price = current_price
+        if current_price is not None:
             record = (symbol, current_price, current_time.strftime('%H:%M:%S'), current_time.strftime('%Y-%m-%d'))
             data.append(record)
-            print(record)
+            #print(record)
         time.sleep(sleep_time)  # Wait for the specified interval
+    else:
+        print("Market is closed.")
+
     print(f"Finished real-time tracking for {symbol} with interval {interval}")
     return data
 

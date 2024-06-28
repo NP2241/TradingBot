@@ -36,7 +36,7 @@ def delete_existing_db_files():
     ]
     for db_file in db_files:
         if os.path.exists(db_file):
-            print(f"\nDeleting existing database file: {db_file}")
+            #print(f"\nDeleting existing database file: {db_file}")
             os.remove(db_file)
 
 def run_setup_database_single_day(print_all=False):
@@ -59,7 +59,7 @@ def run_setup_database_date_range(print_all=False):
     root_dir = get_root_dir()
     setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
 
-    command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-21", "2024-06-24", "1h"]
+    command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-21", "1h", "2024-06-24"]
 
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     output_lines = result.stdout.split('\n')
