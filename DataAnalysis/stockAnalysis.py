@@ -22,8 +22,7 @@ def main():
         sys.executable, setup_database_path, symbol, "yes", start_date, interval, end_date
     ]
 
-    print(f"Running command: {' '.join(command)}")
-    subprocess.run(command)
+    subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 if __name__ == "__main__":
     main()
