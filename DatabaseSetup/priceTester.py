@@ -42,7 +42,7 @@ def delete_existing_db_files():
 def run_setup_database_single_day(print_all=False):
     python_path = sys.executable  # Use the current Python executable
     root_dir = get_root_dir()
-    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
+    setup_database_path = os.path.join(root_dir, "DatabaseSetup/setupDatabase.py")
 
     command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-24", "1h"]
 
@@ -57,7 +57,7 @@ def run_setup_database_single_day(print_all=False):
 def run_setup_database_date_range(print_all=False):
     python_path = sys.executable  # Use the current Python executable
     root_dir = get_root_dir()
-    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
+    setup_database_path = os.path.join(root_dir, "DatabaseSetup/setupDatabase.py")
 
     command = [python_path, setup_database_path, "AAPL", "yes", "2024-06-21", "1h", "2024-06-24"]
 
@@ -76,7 +76,7 @@ def run_real_time_test(symbol="AAPL", interval="1m", duration_minutes=3):
 
     python_path = sys.executable  # Use the current Python executable
     root_dir = get_root_dir()
-    setup_database_path = os.path.join(root_dir, "API/setupDatabase.py")
+    setup_database_path = os.path.join(root_dir, "DatabaseSetup/setupDatabase.py")
 
     command = [python_path, setup_database_path, symbol, "no", datetime.now().strftime('%Y-%m-%d'), interval]
 

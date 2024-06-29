@@ -7,7 +7,6 @@ def track_price(symbol, interval='1m'):
     data = []
     eastern = pytz.timezone('US/Eastern')
     sleep_time = 3600 if interval == '1h' else 60  # Adjust sleep time based on interval
-    print(f"Starting real-time tracking for {symbol} with interval {interval}")
 
     if is_market_open():
         current_time = datetime.now(eastern)
@@ -15,12 +14,7 @@ def track_price(symbol, interval='1m'):
         if current_price is not None:
             record = (symbol, current_price, current_time.strftime('%H:%M:%S'), current_time.strftime('%Y-%m-%d'))
             data.append(record)
-            #print(record)
         time.sleep(sleep_time)  # Wait for the specified interval
-    else:
-        print("Market is closed.")
-
-    print(f"Finished real-time tracking for {symbol} with interval {interval}")
     return data
 
 def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
@@ -33,7 +27,6 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
     else:
         end_date_dt = start_date_dt
 
-    print(f"Starting historical tracking for {symbol} from {start_date} to {end_date or start_date} with interval {interval}")
     current_date = start_date_dt
     while current_date <= end_date_dt:
         if current_date.weekday() >= 5:  # Skip weekends (Saturday and Sunday)
@@ -41,7 +34,6 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
             continue
 
         date_str = current_date.strftime('%Y-%m-%d')
-        print(f"Fetching historical prices for {symbol} on {date_str} with interval {interval}")  # Debugging statement
         prices = get_historical_prices(symbol, date_str, interval=interval)
         if prices is not None:
             last_price = None
@@ -50,15 +42,11 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
                     last_price = price
                     record = (symbol, price, time_stamp.strftime('%H:%M:%S'), time_stamp.strftime('%Y-%m-%d'))
                     data.append(record)
-                    #print(record)
         current_date += timedelta(days=1)
-    print(f"Finished historical tracking for {symbol} from {start_date} to {end_date or start_date} with interval {interval}")
     return data
 
 if __name__ == "__main__":
     import sys
-
-    print(f"Arguments received: {sys.argv}")
 
     if len(sys.argv) >= 6:
         symbol = sys.argv[1].upper()
@@ -86,15 +74,12 @@ if __name__ == "__main__":
             end_date = None
             interval = input("Enter the interval (e.g., 1m, 1h): ").strip()  # Ask for interval
 
-    print(f"Processed arguments: {symbol}, {historical}, {start_date}, {end_date}, {interval}")
-
     if historical:
         data = track_historical_prices(symbol, start_date, end_date, interval)
     else:
         if is_market_open():
             data = track_price(symbol, interval)
         else:
-            print("The market is currently closed.")
             data = []
 
     for record in data:
