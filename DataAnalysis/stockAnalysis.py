@@ -44,7 +44,14 @@ def calculate_stock_analysis(db_path):
 def calculate_buy_index(volatility_index):
     if volatility_index is None:
         return None
-    return 100 - volatility_index  # The inverse of the volatility index
+
+    # Normalize the volatility index to a scale of 0 to 100
+    normalized_volatility_index = min(max(volatility_index, 0), 100)
+
+    # The buy index is directly proportional to the normalized volatility index
+    buy_index = normalized_volatility_index
+
+    return buy_index
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
