@@ -12,15 +12,13 @@ def create_database(db_path):
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS stock_prices
-                 (stock_name TEXT, stock_price REAL, price_time TEXT, price_date TEXT)''')
+                 (stock_name TEXT, stock_price REAL, volume INTEGER, price_time TEXT, price_date TEXT)''')
 
     conn.commit()
     conn.close()
 
 def populate_database(db_path, symbol, historical, start_date, end_date=None, interval='1h'):
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    price_tracker_path = os.path.join(script_dir, "priceTracker.py")
-    command = [sys.executable, price_tracker_path, symbol, "yes" if historical else "no", start_date]
+    command = [sys.executable, os.path.abspath(os.path.join(os.path.dirname(__file__), "priceTracker.py")), symbol, "yes" if historical else "no", start_date]
     if end_date:
         command.append(end_date)
     command.append(interval)
@@ -35,9 +33,8 @@ def populate_database(db_path, symbol, historical, start_date, end_date=None, in
         if line.startswith('(') and line.endswith(')'):
             try:
                 record = eval(line)
-                c.execute("INSERT INTO stock_prices (stock_name, stock_price, price_time, price_date) VALUES (?, ?, ?, ?)", record)
+                c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)", record)
                 conn.commit()
-                print(f"Added entry to the database: {record}")
             except Exception as e:
                 print(f"Error inserting record {line}: {e}")
 
@@ -51,9 +48,7 @@ def generate_db_filename(symbol, start_date, end_date=None, interval='1h'):
         return f"{symbol}_{start_date.replace('-', '.')}_{interval_str}.db"
 
 def populate_real_time_database(db_path, symbol, interval='1m'):
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    price_tracker_path = os.path.join(script_dir, "priceTracker.py")
-    command = [sys.executable, price_tracker_path, symbol, "no", datetime.now().strftime('%Y-%m-%d'), interval]
+    command = [sys.executable, os.path.abspath(os.path.join(os.path.dirname(__file__), "priceTracker.py")), symbol, "no", datetime.now().strftime('%Y-%m-%d'), interval]
 
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -64,9 +59,8 @@ def populate_real_time_database(db_path, symbol, interval='1m'):
         if line.startswith('(') and line.endswith(')'):
             try:
                 record = eval(line)
-                c.execute("INSERT INTO stock_prices (stock_name, stock_price, price_time, price_date) VALUES (?, ?, ?, ?)", record)
+                c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)", record)
                 conn.commit()
-                print(f"Added entry to the database: {record}")
             except Exception as e:
                 print(f"Error inserting real-time record {line}: {e}")
 
@@ -90,8 +84,7 @@ if __name__ == "__main__":
     end_date = sys.argv[5].strip() if len(sys.argv) > 5 else None
 
     db_filename = generate_db_filename(symbol, start_date, end_date, interval)
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    db_path = os.path.abspath(os.path.join(script_dir, "..", "data", db_filename))
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data', db_filename))
 
     create_database(db_path)
 

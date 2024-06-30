@@ -11,22 +11,23 @@ def get_historical_prices(symbol, date_str, interval='1m'):
         if data.empty:
             return None
         else:
-            return data['Close']
+            return data[['Close', 'Volume']]
     except Exception as e:
         print(f"Error fetching historical data for {symbol} on {date_str}: {e}")
         return None
 
-def get_current_price(symbol):
+def get_current_price_and_volume(symbol):
     stock = yf.Ticker(symbol)
     try:
         data = stock.history(period='1d', interval='1m')
         if not data.empty:
-            return data['Close'].iloc[-1]
+            latest_data = data.iloc[-1]
+            return latest_data['Close'], latest_data['Volume']
         else:
-            return None
+            return None, None
     except Exception as e:
-        print(f"Error fetching current price for {symbol}: {e}")
-        return None
+        print(f"Error fetching current price and volume for {symbol}: {e}")
+        return None, None
 
 def is_market_open():
     now = datetime.now()

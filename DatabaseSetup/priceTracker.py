@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta
 import pytz
-from APIFetching import get_current_price, get_historical_prices, is_market_open
+from APIFetching import get_current_price_and_volume, get_historical_prices, is_market_open
 
 def track_price(symbol, interval='1m'):
     data = []
@@ -10,9 +10,9 @@ def track_price(symbol, interval='1m'):
 
     if is_market_open():
         current_time = datetime.now(eastern)
-        current_price = get_current_price(symbol)
-        if current_price is not None:
-            record = (symbol, current_price, current_time.strftime('%H:%M:%S'), current_time.strftime('%Y-%m-%d'))
+        current_price, current_volume = get_current_price_and_volume(symbol)
+        if current_price is not None and current_volume is not None:
+            record = (symbol, current_price, current_volume, current_time.strftime('%H:%M:%S'), current_time.strftime('%Y-%m-%d'))
             data.append(record)
         time.sleep(sleep_time)  # Wait for the specified interval
     return data
@@ -37,10 +37,11 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
         prices = get_historical_prices(symbol, date_str, interval=interval)
         if prices is not None:
             last_price = None
-            for time_stamp, price in prices.items():
+            for time_stamp, price_data in prices.iterrows():
+                price, volume = price_data['Close'], price_data['Volume']
                 if price != last_price:
                     last_price = price
-                    record = (symbol, price, time_stamp.strftime('%H:%M:%S'), time_stamp.strftime('%Y-%m-%d'))
+                    record = (symbol, price, volume, time_stamp.strftime('%H:%M:%S'), time_stamp.strftime('%Y-%m-%d'))
                     data.append(record)
         current_date += timedelta(days=1)
     return data
