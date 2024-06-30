@@ -5,87 +5,103 @@ def calculate_bollinger_bands(prices, window_size=20, num_std_dev=2):
     if len(prices) < window_size:
         return None, None, None
 
-    moving_average = statistics.median(prices[-window_size:])
+    moving_average = statistics.mean(prices[-window_size:])
     std_dev = statistics.stdev(prices[-window_size:])
     upper_band = moving_average + (num_std_dev * std_dev)
     lower_band = moving_average - (num_std_dev * std_dev)
 
     return lower_band, moving_average, upper_band
 
-def calculate_atr(prices, period=14):
-    if len(prices) < period + 1:
-        return None
+def calculate_atr(prices, window_size=14):
+    tr = [max(prices[i] - prices[i-1], abs(prices[i] - prices[i-1]), abs(prices[i-1] - prices[i])) for i in range(1, len(prices))]
+    return np.mean(tr[-window_size:])
 
-    true_ranges = []
-    for i in range(1, len(prices)):
-        high_low = prices[i] - prices[i-1]
-        high_close = abs(prices[i] - prices[i-1])
-        low_close = abs(prices[i-1] - prices[i])
-        true_range = max(high_low, high_close, low_close)
-        true_ranges.append(true_range)
-
-    atr = np.mean(true_ranges[-period:])
-    return atr
-
-def calculate_coefficient_of_variation(prices):
-    if not prices:
-        return None
-
+def calculate_cv(prices):
     mean_price = np.mean(prices)
     std_dev = np.std(prices)
+    return (std_dev / mean_price) * 100
 
-    if mean_price == 0:
+def calculate_rsi(prices, window_size=14):
+    deltas = np.diff(prices)
+    seed = deltas[:window_size + 1]
+    up = seed[seed >= 0].sum() / window_size
+    down = -seed[seed < 0].sum() / window_size
+    rs = up / down
+    rsi = np.zeros_like(prices)
+    rsi[:window_size] = 100. - 100. / (1. + rs)
+
+    for i in range(window_size, len(prices)):
+        delta = deltas[i - 1]  # because the diff is 1 shorter
+
+        if delta > 0:
+            upval = delta
+            downval = 0.
+        else:
+            upval = 0.
+            downval = -delta
+
+        up = (up * (window_size - 1) + upval) / window_size
+        down = (down * (window_size - 1) + downval) / window_size
+
+        rs = up / down
+        rsi[i] = 100. - 100. / (1. + rs)
+
+    return rsi[-1]
+
+def calculate_moving_averages(prices, window_size=20):
+    if len(prices) < window_size:
         return None
-
-    coefficient_of_variation = std_dev / mean_price
-    return coefficient_of_variation
-
-def calculate_stock_metrics(prices):
-    lower_band, moving_average, upper_band = calculate_bollinger_bands(prices)
-
-    return {
-        'lower_band': lower_band,
-        'moving_average': moving_average,
-        'upper_band': upper_band
-    }
+    return np.mean(prices[-window_size:])
 
 def calculate_volatility_index(prices, volumes):
     if not prices or not volumes:
         return None
 
-    metrics = calculate_stock_metrics(prices)
-    if not metrics['lower_band'] or not metrics['moving_average'] or not metrics['upper_band']:
+    lower_band, moving_average, upper_band = calculate_bollinger_bands(prices)
+    atr = calculate_atr(prices)
+    cv = calculate_cv(prices)
+
+    if lower_band is None or moving_average is None or upper_band is None:
         return None
 
-    # Calculate the standard deviation of the prices
+    # Normalize the metrics
     std_dev = statistics.stdev(prices)
+    bollinger_band_width = upper_band - lower_band
+    average_volume = statistics.mean(volumes)
+    median_price = statistics.median(prices)
 
-    # Calculate the Average True Range (ATR)
-    atr = calculate_atr(prices)
-
-    # Calculate the Bollinger Band Width
-    bollinger_band_width = metrics['upper_band'] - metrics['lower_band']
-
-    # Calculate the Coefficient of Variation (CV)
-    coefficient_of_variation = calculate_coefficient_of_variation(prices)
-
-    # Calculate the Volume Weight
-    volume_median = statistics.median(volumes)
-    volume_std_dev = statistics.stdev(volumes)
-    volume_weight = volume_std_dev / (volume_median + 1)
+    normalized_std_dev = std_dev / median_price
+    normalized_atr = atr / median_price
+    normalized_bollinger_band_width = bollinger_band_width / median_price
+    normalized_volume = average_volume / 1_000_000  # Normalize volume by dividing by a large number
 
     # Assign weights to each metric
-    std_dev_weight = 0.35
-    atr_weight = 0.25
+    std_dev_weight = 0.3
+    atr_weight = 0.2
     bollinger_band_width_weight = 0.2
-    cv_weight = 0.1
-    volume_weight_weight = 0.1
+    volume_weight = 0.3
 
     # Calculate volatility index
-    volatility_index = (std_dev_weight * std_dev +
-                        atr_weight * atr +
-                        bollinger_band_width_weight * bollinger_band_width +
-                        cv_weight * coefficient_of_variation +
-                        volume_weight_weight * volume_weight) / (statistics.median(prices) + 1) * 100
+    volatility_index = (std_dev_weight * normalized_std_dev +
+                        atr_weight * normalized_atr +
+                        bollinger_band_width_weight * normalized_bollinger_band_width +
+                        volume_weight * normalized_volume) * 100
 
     return volatility_index
+
+def calculate_stock_metrics(prices, volumes):
+    lower_band, moving_average, upper_band = calculate_bollinger_bands(prices)
+    atr = calculate_atr(prices)
+    cv = calculate_cv(prices)
+    rsi = calculate_rsi(prices)
+    moving_average_value = calculate_moving_averages(prices)
+
+    return {
+        'lower_band': lower_band,
+        'moving_average': moving_average,
+        'upper_band': upper_band,
+        'atr': atr,
+        'cv': cv,
+        'rsi': rsi,
+        'moving_average_value': moving_average_value
+    }

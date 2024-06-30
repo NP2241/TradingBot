@@ -3,7 +3,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from stockMetrics import calculate_volatility_index
+from stockMetrics import calculate_volatility_index, calculate_stock_metrics
 
 def database_exists(db_path):
     return os.path.exists(db_path)
@@ -37,19 +37,28 @@ def calculate_stock_analysis(db_path):
 
     if prices:
         volatility_index = calculate_volatility_index(prices, volumes)
-        return volatility_index
+        metrics = calculate_stock_metrics(prices, volumes)
+        return volatility_index, metrics
     else:
+        return None, None
+
+def calculate_buy_index(volatility_index, metrics, current_price):
+    if volatility_index is None or metrics is None:
         return None
 
-def calculate_buy_index(volatility_index):
-    if volatility_index is None:
-        return None
+    # Normalize RSI and moving average deviation
+    normalized_rsi = min(max((100 - metrics['rsi']), 0), 100)
+    normalized_moving_average = min(max((100 - abs(metrics['moving_average_value'] - current_price) / current_price * 100), 0), 100)
 
-    # Normalize the volatility index to a scale of 0 to 100
-    normalized_volatility_index = min(max(volatility_index, 0), 100)
+    # Adjust weights as necessary
+    volatility_weight = 0.6  # Higher weight for volatility index
+    rsi_weight = 0.2
+    moving_average_weight = 0.2
 
-    # The buy index is directly proportional to the normalized volatility index
-    buy_index = normalized_volatility_index
+    # Calculate buy index
+    buy_index = (volatility_weight * volatility_index +
+                 rsi_weight * normalized_rsi +
+                 moving_average_weight * normalized_moving_average) / 100
 
     return buy_index
 
@@ -72,9 +81,10 @@ if __name__ == "__main__":
         while not (database_exists(db_path) and check_db_populated(db_path)):
             time.sleep(0.1)
 
-    volatility_index = calculate_stock_analysis(db_path)
-    if volatility_index is not None:
-        buy_index = calculate_buy_index(volatility_index)
+    volatility_index, metrics = calculate_stock_analysis(db_path)
+    if volatility_index is not None and metrics is not None:
+        current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
+        buy_index = calculate_buy_index(volatility_index, metrics, current_price)
         print(f"Volatility Index: {volatility_index}")
         print(f"Buy Index: {buy_index}")
     else:
