@@ -35,9 +35,14 @@ def calculate_stock_analysis(db_path):
 
     if prices:
         volatility_index = calculate_volatility_index(prices)
-        return volatility_index
+        buy_index = set_buy_index(volatility_index)
+        return volatility_index, buy_index
     else:
-        return None
+        return None, None
+
+def set_buy_index(volatility_index):
+    # The inverse of the volatility index
+    return 100 - volatility_index
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
@@ -58,8 +63,9 @@ if __name__ == "__main__":
         while not (database_exists(db_path) and check_db_populated(db_path)):
             time.sleep(0.1)
 
-    volatility_index = calculate_stock_analysis(db_path)
+    volatility_index, buy_index = calculate_stock_analysis(db_path)
     if volatility_index is not None:
         print(f"Volatility Index: {volatility_index}")
+        print(f"Buy Index: {buy_index}")
     else:
         print("No data available to calculate the stock analysis.")
