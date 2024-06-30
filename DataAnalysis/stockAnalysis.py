@@ -3,7 +3,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-import statistics
+from stockMetrics import calculate_volatility_index
 
 def database_exists(db_path):
     return os.path.exists(db_path)
@@ -29,19 +29,15 @@ def check_db_populated(db_path):
 def calculate_stock_analysis(db_path):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute("SELECT stock_price, volume FROM stock_prices")
-    data = c.fetchall()
-    prices = [row[0] for row in data]
-    volumes = [row[1] for row in data]
+    c.execute("SELECT stock_price FROM stock_prices")
+    prices = [row[0] for row in c.fetchall()]
     conn.close()
 
     if prices:
-        median_price = statistics.median(prices)
-        std_dev = statistics.stdev(prices)
-        volatility_index = (std_dev / median_price) * 100
-        print(f"Volatility Index: {volatility_index}")
+        volatility_index = calculate_volatility_index(prices)
+        return volatility_index
     else:
-        print("No data available to calculate the stock analysis.")
+        return None
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
@@ -59,8 +55,11 @@ if __name__ == "__main__":
         print("Database does not exist. Creating database...")
         create_database(symbol, start_date, end_date, interval)
 
-        # Wait until the database is created and populated
         while not (database_exists(db_path) and check_db_populated(db_path)):
             time.sleep(0.1)
 
-    calculate_stock_analysis(db_path)
+    volatility_index = calculate_stock_analysis(db_path)
+    if volatility_index is not None:
+        print(f"Volatility Index: {volatility_index}")
+    else:
+        print("No data available to calculate the stock analysis.")
