@@ -29,20 +29,22 @@ def check_db_populated(db_path):
 def calculate_stock_analysis(db_path):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute("SELECT stock_price FROM stock_prices")
-    prices = [row[0] for row in c.fetchall()]
+    c.execute("SELECT stock_price, volume FROM stock_prices")
+    data = c.fetchall()
+    prices = [row[0] for row in data]
+    volumes = [row[1] for row in data]
     conn.close()
 
     if prices:
-        volatility_index = calculate_volatility_index(prices)
-        buy_index = set_buy_index(volatility_index)
-        return volatility_index, buy_index
+        volatility_index = calculate_volatility_index(prices, volumes)
+        return volatility_index
     else:
-        return None, None
+        return None
 
-def set_buy_index(volatility_index):
-    # The inverse of the volatility index
-    return 100 - volatility_index
+def calculate_buy_index(volatility_index):
+    if volatility_index is None:
+        return None
+    return 100 - volatility_index  # The inverse of the volatility index
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
@@ -63,8 +65,9 @@ if __name__ == "__main__":
         while not (database_exists(db_path) and check_db_populated(db_path)):
             time.sleep(0.1)
 
-    volatility_index, buy_index = calculate_stock_analysis(db_path)
+    volatility_index = calculate_stock_analysis(db_path)
     if volatility_index is not None:
+        buy_index = calculate_buy_index(volatility_index)
         print(f"Volatility Index: {volatility_index}")
         print(f"Buy Index: {buy_index}")
     else:
