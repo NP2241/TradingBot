@@ -13,8 +13,11 @@ def create_database(symbol, start_date, end_date, interval):
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
     subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-def get_db_path(symbol, start_date, end_date, interval):
-    db_filename = f"{symbol}_{start_date.replace('-', '.')}_{end_date.replace('-', '.')}_{interval.replace(' ', '').replace(':', '').replace('-', '')}.db"
+def get_db_path(symbol, start_date, end_date=None, interval='1h'):
+    if end_date:
+        db_filename = f"{symbol}_{start_date.replace('-', '.')}_{end_date.replace('-', '.')}_{interval.replace(' ', '').replace(':', '').replace('-', '')}.db"
+    else:
+        db_filename = f"{symbol}_{start_date.replace('-', '.')}_{interval.replace(' ', '').replace(':', '').replace('-', '')}.db"
     db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data', db_filename))
     return db_path
 
