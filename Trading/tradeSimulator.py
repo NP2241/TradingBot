@@ -36,14 +36,12 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
         buy_index = calculate_buy_index(volatility_index, metrics, current_price)
-        print(f"Volatility Index: {volatility_index}")
-        print(f"Buy Index: {buy_index}")
     else:
         print("No data available to calculate the stock analysis.")
         return
 
-    lower_band = metrics['lower_band']
-    upper_band = metrics['upper_band']
+    lower_band = min(metrics['lower_band'], metrics['upper_band'])
+    upper_band = max(metrics['lower_band'], metrics['upper_band'])
 
     # Create the single day database if it doesn't exist
     single_day_db_path = get_db_path(symbol, simulate_date, interval=interval)
@@ -69,20 +67,23 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
     shares = 0
 
     for price, volume, date, time_ in stock_data:
-        if price <= lower_band:  # Buy condition
-            if cash >= price:
-                shares += 1
-                cash -= price
-                print(f"Bought 1 share of {symbol} at {price} on {date} {time_}")
-        elif price >= upper_band and shares > 0:  # Sell condition
-            shares -= 1
-            cash += price
-            print(f"Sold 1 share of {symbol} at {price} on {date} {time_}")
+        if price <= lower_band * 1.01:  # Buy condition within 1% of lower band
+            shares_to_buy = cash // price
+            if shares_to_buy > 0:
+                shares += shares_to_buy
+                cash -= shares_to_buy * price
+        elif price >= upper_band * 0.99 and shares > 0:  # Sell condition within 1% of upper band
+            cash += shares * price
+            shares = 0
+
+    ending_price = stock_data[-1][0]  # Closing price on the simulation date
+    equity = cash + (shares * ending_price)
+    returns_percentage = ((equity - 10000) / 10000) * 100
 
     print(f"Ending cash: {cash}")
     print(f"Ending shares of {symbol}: {shares}")
-    print(f"Lower Band: {lower_band}")
-    print(f"Upper Band: {upper_band}")
+    print(f"Equity: {equity}")
+    print(f"Percentage Returns: {returns_percentage}%")
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
