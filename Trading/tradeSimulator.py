@@ -70,18 +70,19 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
 
     for price, volume, date, time_ in stock_data:
         if price <= lower_band:  # Buy condition
-            shares_to_buy = cash // price
-            if shares_to_buy > 0:
-                shares += shares_to_buy
-                cash -= shares_to_buy * price
-                print(f"Bought {shares_to_buy} shares of {symbol} at {price} on {date} {time_}")
+            if cash >= price:
+                shares += 1
+                cash -= price
+                print(f"Bought 1 share of {symbol} at {price} on {date} {time_}")
         elif price >= upper_band and shares > 0:  # Sell condition
-            cash += shares * price
-            print(f"Sold {shares} shares of {symbol} at {price} on {date} {time_}")
-            shares = 0
+            shares -= 1
+            cash += price
+            print(f"Sold 1 share of {symbol} at {price} on {date} {time_}")
 
     print(f"Ending cash: {cash}")
     print(f"Ending shares of {symbol}: {shares}")
+    print(f"Lower Band: {lower_band}")
+    print(f"Upper Band: {upper_band}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
