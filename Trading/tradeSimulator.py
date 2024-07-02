@@ -22,7 +22,7 @@ def check_table_exists(db_path):
     conn.close()
     return result is not None
 
-def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
+def simulate_trading(symbol, start_date, end_date, interval, simulate_date, threshold):
     # Ensure the database for the range exists
     db_path = get_db_path(symbol, start_date, end_date, interval)
     if not database_exists(db_path):
@@ -67,12 +67,12 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
     shares = 0
 
     for price, volume, date, time_ in stock_data:
-        if price <= lower_band * 1.01:  # Buy condition within 1% of lower band
+        if price <= lower_band * (1 + (threshold / 100)):  # Buy condition within the specified percentage of the lower band
             shares_to_buy = cash // price
             if shares_to_buy > 0:
                 shares += shares_to_buy
                 cash -= shares_to_buy * price
-        elif price >= upper_band * 0.99 and shares > 0:  # Sell condition within 1% of upper band
+        elif price >= upper_band * (1 - (threshold / 100)) and shares > 0:  # Sell condition within the specified percentage of the upper band
             cash += shares * price
             shares = 0
 
@@ -86,8 +86,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_date):
     print(f"Percentage Returns: {returns_percentage}%")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 6:
-        print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_date>")
+    if len(sys.argv) != 7:
+        print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_date> <threshold>")
         sys.exit(1)
 
     symbol = sys.argv[1].upper()
@@ -95,5 +95,6 @@ if __name__ == "__main__":
     end_date = sys.argv[3].strip()
     interval = sys.argv[4].strip()
     simulate_date = sys.argv[5].strip()
+    threshold = float(sys.argv[6].strip())
 
-    simulate_trading(symbol, start_date, end_date, interval, simulate_date)
+    simulate_trading(symbol, start_date, end_date, interval, simulate_date, threshold)
