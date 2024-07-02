@@ -6,7 +6,8 @@ def run_trade_simulator():
     start_date = "2024-06-17"
     end_date = "2024-06-24"
     interval = "1m"
-    simulate_date = "2024-06-25"
+    simulate_start_date = "2024-06-25"
+    simulate_end_date = "2024-06-26"
     threshold = 1  # 1% threshold
 
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'tradeSimulator.py'))
@@ -17,7 +18,8 @@ def run_trade_simulator():
         start_date,
         end_date,
         interval,
-        simulate_date,
+        simulate_start_date,
+        simulate_end_date,
         str(threshold)
     ]
     subprocess.run(command, check=True)
