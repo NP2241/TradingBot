@@ -88,14 +88,20 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     current_date = simulate_start_date
 
-    # Load initial trading state
-    cash, shares = load_trading_state(os.path.join(trade_data_folder, f"{simulate_start_date}_trades.db"))
-
-    starting_cash = cash  # Track initial starting cash
+    starting_cash = 10000  # Track initial starting cash
     ending_price = 0
 
     while current_date <= simulate_end_date:
         trade_data_path = os.path.join(trade_data_folder, f"{current_date}_trades.db")
+
+        # For the first day, load the initial trading state
+        if current_date == simulate_start_date:
+            cash, shares = load_trading_state(trade_data_path)
+        else:
+            # For subsequent days, load the state from the previous day's database
+            previous_day = (datetime.strptime(current_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+            previous_trade_data_path = os.path.join(trade_data_folder, f"{previous_day}_trades.db")
+            cash, shares = load_trading_state(previous_trade_data_path)
 
         # Create the single day database if it doesn't exist
         single_day_db_path = get_db_path(symbol, current_date, interval=interval)
@@ -119,7 +125,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         # Track starting equity for the day
         start_equity = cash + (shares * stock_data[0][0])
-        print(f"Starting equity for {current_date}: {start_equity}")
 
         for price, volume, date, time_ in stock_data:
             if price <= lower_band * (1 + (threshold / 100)):  # Buy condition within the specified percentage of the lower band
@@ -136,7 +141,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         returns_percentage = ((equity - start_equity) / start_equity) * 100
 
         # Print the one-line output for the day
-        print(f"Date: {current_date}, Daily Percentage Returns: {returns_percentage:.2f}%")
+        print(f"Date: {current_date}, Starting Equity: {start_equity}, Ending Equity: {equity}, Daily Percentage Returns: {returns_percentage:.2f}%")
 
         # Save trading state at the end of the day
         save_trading_state(trade_data_path, cash, shares, symbol)
