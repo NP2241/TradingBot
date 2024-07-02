@@ -91,6 +91,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     starting_cash = 10000  # Track initial starting cash
     ending_price = 0
 
+    prev_closing_equity = None
+
     while current_date <= simulate_end_date:
         trade_data_path = os.path.join(trade_data_folder, f"{current_date}_trades.db")
 
@@ -125,6 +127,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         # Track starting equity for the day
         start_equity = cash + (shares * stock_data[0][0])
+        if prev_closing_equity is None:
+            prev_closing_equity = start_equity
 
         for price, volume, date, time_ in stock_data:
             if price <= lower_band * (1 + (threshold / 100)):  # Buy condition within the specified percentage of the lower band
@@ -137,14 +141,21 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
                 shares = 0
 
         ending_price = stock_data[-1][0]  # Closing price on the simulation date
-        equity = cash + (shares * ending_price)
-        returns_percentage = ((equity - start_equity) / start_equity) * 100
+        ending_equity = cash + (shares * ending_price)
+
+        if prev_closing_equity is not None:
+            returns_percentage = ((ending_equity - prev_closing_equity) / prev_closing_equity) * 100
+        else:
+            returns_percentage = ((ending_equity - starting_cash) / starting_cash) * 100
 
         # Print the one-line output for the day
-        print(f"Date: {current_date}, Starting Equity: {start_equity}, Ending Equity: {equity}, Daily Percentage Returns: {returns_percentage:.2f}%")
+        print(f"Date: {current_date}, Starting Equity: {start_equity}, Ending Equity: {ending_equity}, Daily Percentage Returns: {returns_percentage:.2f}%")
 
         # Save trading state at the end of the day
         save_trading_state(trade_data_path, cash, shares, symbol)
+
+        # Update prev_closing_equity for the next day
+        prev_closing_equity = ending_equity
 
         # Move to the next day
         current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
