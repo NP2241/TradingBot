@@ -30,7 +30,7 @@ def load_trading_state(trade_data_path):
 
     conn = sqlite3.connect(trade_data_path)
     c = conn.cursor()
-    c.execute("SELECT cash, shares FROM trading_state ORDER BY id DESC LIMIT 1")
+    c.execute("SELECT cash, shares FROM trading_state ORDER BY date DESC LIMIT 1")
     result = c.fetchone()
     conn.close()
 
@@ -39,32 +39,23 @@ def load_trading_state(trade_data_path):
     else:
         return 10000, 0  # Default starting cash and shares
 
-def save_trading_state(trade_data_path, cash, shares, symbol):
+def save_trading_state(trade_data_path, date, cash, shares, equity):
     conn = sqlite3.connect(trade_data_path)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS trading_state (id INTEGER PRIMARY KEY, cash REAL, shares REAL, symbol TEXT)''')
-    c.execute("DELETE FROM trading_state")  # Clear previous entries
-    c.execute("INSERT INTO trading_state (cash, shares, symbol) VALUES (?, ?, ?)", (cash, shares, symbol))
+    c.execute('''CREATE TABLE IF NOT EXISTS trading_state (date TEXT, cash REAL, shares REAL, equity REAL)''')
+    c.execute("INSERT INTO trading_state (date, cash, shares, equity) VALUES (?, ?, ?, ?)", (date, cash, shares, equity))
     conn.commit()
     conn.close()
 
-def clear_trade_data_folder(trade_data_folder):
-    if os.path.exists(trade_data_folder):
-        for filename in os.listdir(trade_data_folder):
-            file_path = os.path.join(trade_data_folder, filename)
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                print(f'Failed to delete {file_path}. Reason: {e}')
+def clear_trade_data_file(trade_data_file):
+    if os.path.exists(trade_data_file):
+        os.remove(trade_data_file)
 
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold):
-    # Clear the trade data folder
-    trade_data_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data/tradeData'))
-    os.makedirs(trade_data_folder, exist_ok=True)
-    clear_trade_data_folder(trade_data_folder)
+    # Clear the trade data file
+    trade_data_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data/tradeData/trade_data.db'))
+    os.makedirs(os.path.dirname(trade_data_file), exist_ok=True)
+    clear_trade_data_file(trade_data_file)
 
     # Ensure the database for the range exists
     db_path = get_db_path(symbol, start_date, end_date, interval)
@@ -94,16 +85,21 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     prev_closing_equity = None
 
     while current_date <= simulate_end_date:
-        trade_data_path = os.path.join(trade_data_folder, f"{current_date}_trades.db")
-
         # For the first day, load the initial trading state
         if current_date == simulate_start_date:
-            cash, shares = load_trading_state(trade_data_path)
+            cash, shares = load_trading_state(trade_data_file)
         else:
-            # For subsequent days, load the state from the previous day's database
-            previous_day = (datetime.strptime(current_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
-            previous_trade_data_path = os.path.join(trade_data_folder, f"{previous_day}_trades.db")
-            cash, shares = load_trading_state(previous_trade_data_path)
+            # For subsequent days, load the state from the previous day's entry in the trade data file
+            conn = sqlite3.connect(trade_data_file)
+            c = conn.cursor()
+            c.execute("SELECT cash, shares, equity FROM trading_state ORDER BY date DESC LIMIT 1")
+            previous_state = c.fetchone()
+            conn.close()
+            if previous_state:
+                cash, shares, prev_closing_equity = previous_state
+            else:
+                cash, shares = 10000, 0
+                prev_closing_equity = None
 
         # Create the single day database if it doesn't exist
         single_day_db_path = get_db_path(symbol, current_date, interval=interval)
@@ -148,11 +144,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         else:
             returns_percentage = ((ending_equity - starting_cash) / starting_cash) * 100
 
-        # Print the one-line output for the day
-        print(f"Date: {current_date}, Starting Equity: {start_equity}, Ending Equity: {ending_equity}, Daily Percentage Returns: {returns_percentage:.2f}%")
-
         # Save trading state at the end of the day
-        save_trading_state(trade_data_path, cash, shares, symbol)
+        save_trading_state(trade_data_file, current_date, cash, shares, ending_equity)
 
         # Update prev_closing_equity for the next day
         prev_closing_equity = ending_equity
