@@ -3,11 +3,11 @@ import os
 
 def run_trade_simulator():
     symbol = "AAPL"
-    start_date = "2024-06-17"
-    end_date = "2024-06-24"
+    start_date = "2024-07-02"
+    end_date = "2024-07-09"
     interval = "1m"
-    simulate_start_date = "2024-06-25"
-    simulate_end_date = "2024-06-26"
+    simulate_start_date = "2024-07-10"
+    simulate_end_date = "2024-07-12"
     threshold = 1  # 1% threshold
 
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'tradeSimulator.py'))
