@@ -32,6 +32,10 @@ def clear_trade_data_file(trade_data_file):
     if os.path.exists(trade_data_file):
         os.remove(trade_data_file)
 
+def initialize_trade_data_file(trade_data_file):
+    with open(trade_data_file, 'w') as f:
+        f.write("date,cash,shares,equity\n")
+
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Ensure the database for the range exists
     db_path = get_db_path(symbol, start_date, end_date, interval)
@@ -67,6 +71,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
     clear_trade_data_file(trade_data_file)
+    initialize_trade_data_file(trade_data_file)
 
     # Initialize starting values for the first day
     cash = initial_cash  # Starting cash in USD
