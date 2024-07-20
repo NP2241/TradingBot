@@ -13,7 +13,6 @@ from stockMetrics import calculate_bollinger_bands
 def create_simulation_database(symbol, start_date, end_date, interval):
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup/setupDatabase.py'))
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
-    print(f"Running command to create range database: {' '.join(command)}")
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 def create_database(symbol, start_date, end_date, interval):
@@ -33,29 +32,9 @@ def clear_trade_data_file(trade_data_file):
     if os.path.exists(trade_data_file):
         os.remove(trade_data_file)
 
-def initialize_trade_data_file(trade_data_file, start_date, initial_cash):
-    if not os.path.exists(trade_data_file):
-        with open(trade_data_file, 'w') as f:
-            f.write("date,cash,shares,equity\n")
-            f.write(f"{start_date},{initial_cash},0,{initial_cash}\n")
-        print(f"Trade data file initialized with starting values for {start_date}")
-
-def write_trade_data(trade_data_file, date, cash, shares, equity):
-    with open(trade_data_file, 'a') as f:
-        f.write(f"{date},{cash},{shares},{equity}\n")
-    print(f"Trade data written: {date},{cash},{shares},{equity}")  # Debug print statement
-
-def read_last_trade_data(trade_data_file):
-    with open(trade_data_file, 'r') as f:
-        lines = f.readlines()
-        last_line = lines[-1].strip()
-        _, cash, shares, equity = last_line.split(',')
-        return float(cash), int(shares), float(equity)
-
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Ensure the database for the range exists
     db_path = get_db_path(symbol, start_date, end_date, interval)
-    db_name = os.path.basename(db_path)
     if not database_exists(db_path):
         print(f"Database for {symbol} does not exist. Creating database...")
         create_database(symbol, start_date, end_date, interval)
@@ -64,7 +43,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             print("Waiting for database to be populated...")
             time.sleep(1)
 
-    print(f"Database {db_name} exists and is populated.")
+    print(f"Database {os.path.basename(db_path)} exists and is populated.")
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
@@ -78,7 +57,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     # Create the simulation date range database if it doesn't exist
     simulate_db_path = get_db_path(symbol, simulate_start_date, simulate_end_date, interval)
-    simulate_db_name = os.path.basename(simulate_db_path)
     if not database_exists(simulate_db_path):
         print(f"Creating database for {symbol} from {simulate_start_date} to {simulate_end_date}...")
         create_simulation_database(symbol, simulate_start_date, simulate_end_date, interval)
@@ -89,12 +67,14 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
     clear_trade_data_file(trade_data_file)
-    initialize_trade_data_file(trade_data_file, simulate_start_date, initial_cash)
 
-    cash, shares, prev_closing_equity = read_last_trade_data(trade_data_file)
+    # Initialize starting values for the first day
+    cash = initial_cash  # Starting cash in USD
+    shares = 0
 
     # Iterate through each simulation day
     current_date = simulate_start_date
+    prev_closing_equity = cash
 
     while current_date <= simulate_end_date:
         # Read the data from the simulation date range database
@@ -123,7 +103,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         returns_percentage = ((equity - prev_closing_equity) / prev_closing_equity) * 100
         prev_closing_equity = equity
 
-        write_trade_data(trade_data_file, current_date, cash, shares, equity)
+        with open(trade_data_file, 'a') as f:
+            f.write(f"{current_date},{cash},{shares},{equity}\n")
 
         current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -139,18 +120,18 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     print(f"Final Equity: {total_equity}")
     print(f"Total Percentage Returns: {total_returns}%")
 
-if __name__ == "__main__":
-    if len(sys.argv) != 9:
-        print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash>")
-        sys.exit(1)
 
-    symbol = sys.argv[1].upper()
-    start_date = sys.argv[2].strip()
-    end_date = sys.argv[3].strip()
-    interval = sys.argv[4].strip()
-    simulate_start_date = sys.argv[5].strip()
-    simulate_end_date = sys.argv[6].strip()
-    threshold = float(sys.argv[7].strip())
-    initial_cash = float(sys.argv[8].strip())
+if len(sys.argv) != 9:
+    print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash>")
+    sys.exit(1)
 
-    simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash)
+symbol = sys.argv[1].upper()
+start_date = sys.argv[2].strip()
+end_date = sys.argv[3].strip()
+interval = sys.argv[4].strip()
+simulate_start_date = sys.argv[5].strip()
+simulate_end_date = sys.argv[6].strip()
+threshold = float(sys.argv[7].strip())
+initial_cash = float(sys.argv[8].strip())
+
+simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash)
