@@ -15,11 +15,14 @@ def create_simulation_database(symbol, start_date, end_date, interval):
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
     print(f"Running command to create range database: {' '.join(command)}")
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(f"Database saved at: {os.path.basename(db_path)}")
 
 def create_database(symbol, start_date, end_date, interval):
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup/setupDatabase.py'))
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
+    print(f"Running command to create range database: {' '.join(command)}")
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(f"Database saved at: {os.path.basename(db_path)}")
 
 def check_table_exists(db_path):
     conn = sqlite3.connect(db_path)
@@ -36,6 +39,7 @@ def clear_trade_data_file(trade_data_file):
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold):
     # Ensure the database for the range exists
     db_path = get_db_path(symbol, start_date, end_date, interval)
+    db_name = os.path.basename(db_path)
     if not database_exists(db_path):
         print(f"Database for {symbol} does not exist. Creating database...")
         create_database(symbol, start_date, end_date, interval)
@@ -44,7 +48,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             print("Waiting for database to be populated...")
             time.sleep(1)
 
-    print(f"Database {db_path} exists and is populated.")
+    print(f"Database {db_name} exists and is populated.")
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
@@ -58,6 +62,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     # Create the simulation date range database if it doesn't exist
     simulate_db_path = get_db_path(symbol, simulate_start_date, simulate_end_date, interval)
+    simulate_db_name = os.path.basename(simulate_db_path)
     if not database_exists(simulate_db_path):
         print(f"Creating database for {symbol} from {simulate_start_date} to {simulate_end_date}...")
         create_simulation_database(symbol, simulate_start_date, simulate_end_date, interval)
@@ -120,17 +125,17 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     print(f"Final Equity: {total_equity}")
     print(f"Total Percentage Returns: {total_returns}%")
 
+if __name__ == "__main__":
+    if len(sys.argv) != 8:
+        print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold>")
+        sys.exit(1)
 
-if __name__ == "__8":
-    print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold>")
-    sys.exit(1)
+    symbol = sys.argv[1].upper()
+    start_date = sys.argv[2].strip()
+    end_date = sys.argv[3].strip()
+    interval = sys.argv[4].strip()
+    simulate_start_date = sys.argv[5].strip()
+    simulate_end_date = sys.argv[6].strip()
+    threshold = float(sys.argv[7].strip())
 
-symbol = sys.argv[1].upper()
-start_date = sys.argv[2].strip()
-end_date = sys.argv[3].strip()
-interval = sys.argv[4].strip()
-simulate_start_date = sys.argv[5].strip()
-simulate_end_date = sys.argv[6].strip()
-threshold = float(sys.argv[7].strip())
-
-simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold)
+    simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold)
