@@ -15,17 +15,11 @@ def create_simulation_database(symbol, start_date, end_date, interval):
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
     print(f"Running command to create range database: {' '.join(command)}")
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    print(f"Command output: {result.stdout}")
-    print(f"Command errors: {result.stderr}")
-
 
 def create_database(symbol, start_date, end_date, interval):
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup/setupDatabase.py'))
     command = [sys.executable, script_path, symbol, "yes", start_date, interval, end_date]
-    print(f"Running command to create range database: {' '.join(command)}")  # Add this line
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    print(f"Command output: {result.stdout}")  # Add this line
-    print(f"Command errors: {result.stderr}")  # Add this line
 
 def check_table_exists(db_path):
     conn = sqlite3.connect(db_path)
@@ -127,17 +121,16 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     print(f"Total Percentage Returns: {total_returns}%")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 8:
-        print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold>")
-        sys.exit(1)
+if __name__ == "__8":
+    print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold>")
+    sys.exit(1)
 
-    symbol = sys.argv[1].upper()
-    start_date = sys.argv[2].strip()
-    end_date = sys.argv[3].strip()
-    interval = sys.argv[4].strip()
-    simulate_start_date = sys.argv[5].strip()
-    simulate_end_date = sys.argv[6].strip()
-    threshold = float(sys.argv[7].strip())
+symbol = sys.argv[1].upper()
+start_date = sys.argv[2].strip()
+end_date = sys.argv[3].strip()
+interval = sys.argv[4].strip()
+simulate_start_date = sys.argv[5].strip()
+simulate_end_date = sys.argv[6].strip()
+threshold = float(sys.argv[7].strip())
 
-    simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold)
+simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold)
