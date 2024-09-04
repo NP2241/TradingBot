@@ -3,11 +3,11 @@ import os
 
 def run_trade_simulator():
     symbol = "AAPL"
-    start_date = "2024-07-02"
-    end_date = "2024-07-09"
+    start_date = "2024-08-19"
+    end_date = "2024-08-23"
     interval = "1m"
-    simulate_start_date = "2024-07-10"
-    simulate_end_date = "2024-07-12"
+    simulate_start_date = "2024-08-26"
+    simulate_end_date = "2024-08-30"
     threshold = 1  # 1% threshold
     initial_cash = 10000  # Initial cash amount
 
