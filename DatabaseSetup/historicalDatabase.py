@@ -10,7 +10,7 @@ import pytz
 # Load environment variables from paths.env file
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../paths.env'))
 load_dotenv(dotenv_path)
-POLYGON_API_KEY = os.getenv('POLYGON_API_KEY')
+POLYGON_API_KEYS = os.getenv('POLYGON_API_KEYS').split(',')
 
 MARKET_OPEN_TIME = 9 * 60 + 30  # 9:30 AM in minutes
 MARKET_CLOSE_TIME = 16 * 60     # 4:00 PM in minutes
@@ -24,12 +24,12 @@ def create_database(db_path):
     conn.commit()
     conn.close()
 
-def fetch_historical_data(symbol, date):
+def fetch_historical_data(symbol, date, api_key):
     start_date = date.strftime('%Y-%m-%d')
     end_date = (date + timedelta(days=1)).strftime('%Y-%m-%d')
     url = f'https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{start_date}/{end_date}'
     params = {
-        'apiKey': POLYGON_API_KEY,
+        'apiKey': api_key,
     }
     response = requests.get(url, params=params)
     response.raise_for_status()
@@ -61,19 +61,21 @@ def populate_database(db_path, symbol):
 
     total_api_calls = 0
     start_time = time.time()
+    key_index = 0  # Start with the first key
 
     for i in range(total_days):
         current_date = start_date + timedelta(days=i)
 
         while True:
             try:
-                data = fetch_historical_data(symbol, current_date)
+                api_key = POLYGON_API_KEYS[key_index]
+                data = fetch_historical_data(symbol, current_date, api_key)
                 total_api_calls += 1
                 break
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:  # Too Many Requests
-                    print("\nRate limit exceeded. Waiting for 60 seconds...")
-                    time.sleep(60)
+                    print("\nRate limit exceeded. Switching API key...")
+                    key_index = (key_index + 1) % len(POLYGON_API_KEYS)
                 else:
                     raise
 
@@ -115,4 +117,4 @@ if __name__ == "__main__":
     create_database(db_path)
     populate_database(db_path, symbol)
 
-    print(f"\nDatabase saved at: {db_path}")
+    print(f"\nDatabase saved at: {db_filename}")

@@ -47,7 +47,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             print("Waiting for database to be populated...")
             time.sleep(1)
 
-    print(f"Database {os.path.basename(db_path)} exists and is populated.")
+    #print(f"Database {os.path.basename(db_path)} exists and is populated.")
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
@@ -110,6 +110,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         with open(trade_data_file, 'a') as f:
             f.write(f"{current_date},{cash},{shares},{equity}\n")
+            print(current_date, " ", cash, " ", shares, " ", equity)
+
 
         current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
