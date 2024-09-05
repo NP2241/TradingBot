@@ -4,6 +4,7 @@ import sqlite3
 import time
 import subprocess
 from datetime import datetime, timedelta
+import holidays
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../DataAnalysis')))
 
@@ -31,6 +32,18 @@ def check_table_exists(db_path):
 def clear_trade_data_file(trade_data_file):
     if os.path.exists(trade_data_file):
         os.remove(trade_data_file)
+
+def is_market_closed(date):
+    # Check if the date is a weekend
+    if date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return True
+
+    # Check if the date is a US market holiday
+    us_holidays = holidays.US()
+    if date in us_holidays:
+        return True
+
+    return False
 
 def initialize_trade_data_file(trade_data_file):
     os.makedirs(os.path.dirname(trade_data_file), exist_ok=True)
@@ -134,6 +147,14 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     prev_closing_equity = cash
 
     while current_date <= simulate_end_date:
+        current_date_dt = datetime.strptime(current_date, '%Y-%m-%d')
+
+        # Check if the market is closed on this date
+        if is_market_closed(current_date_dt):
+            print(f"Market closed on {current_date}. Skipping this day.")
+            current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+            continue
+
         # Read the data from the simulation date range database
         conn = sqlite3.connect(simulate_db_path)
         c = conn.cursor()
@@ -141,9 +162,11 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         stock_data = c.fetchall()
         conn.close()
 
+        # If no stock data is available and it's not a market closure day, skip to the next day
         if not stock_data:
-            print(f"No data available for {symbol} on {current_date} even after creation.")
-            return
+            print(f"No data available for {symbol} on {current_date}.")
+            current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+            continue
 
         for price, volume, date, time_ in stock_data:
             if price <= lower_band * (1 + (threshold / 100)):  # Buy condition within the specified percentage of the lower band
@@ -162,7 +185,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         write_trade_to_db(trade_data_file, current_date, cash, shares, equity)
 
-        current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+        current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
         # Recalculate the Bollinger Bands
         volatility_index, metrics = calculate_stock_analysis(db_path)
@@ -175,7 +198,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     print(f"Final Equity: {total_equity}")
     print(f"Total Percentage Returns: {total_returns}%")
-
 if len(sys.argv) != 9:
     print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash>")
     sys.exit(1)
