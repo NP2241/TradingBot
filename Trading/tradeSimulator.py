@@ -51,6 +51,18 @@ def initialize_trade_data_file(trade_data_file):
     conn.commit()
     conn.close()
 
+def write_trade_to_db(trade_data_file, current_date, cash, shares, equity):
+    conn = sqlite3.connect(trade_data_file)
+    c = conn.cursor()
+
+    # Insert the values into the trades table
+    c.execute("INSERT INTO trades (date, cash, shares, equity) VALUES (?, ?, ?, ?)",
+              (current_date, cash, shares, equity))
+
+    conn.commit()
+    conn.close()
+
+
 def print_trade_data_file(trade_data_file):
     if os.path.exists(trade_data_file):
         with open(trade_data_file, 'r') as f:
@@ -134,10 +146,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         returns_percentage = ((equity - prev_closing_equity) / prev_closing_equity) * 100
         prev_closing_equity = equity
 
-        with open(trade_data_file, 'a') as f:
-            f.write(f"{current_date},{cash},{shares},{equity}\n")
-            #print(current_date, " ", cash, " ", shares, " ", equity)
-
+        write_trade_to_db(trade_data_file, current_date, cash, shares, equity)
 
         current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
