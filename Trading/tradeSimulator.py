@@ -62,6 +62,18 @@ def write_trade_to_db(trade_data_file, current_date, cash, shares, equity):
     conn.commit()
     conn.close()
 
+def get_last_trade_data(trade_data_file):
+    conn = sqlite3.connect(trade_data_file)
+    c = conn.cursor()
+
+    c.execute("SELECT date, cash, shares, equity FROM trades ORDER BY date DESC LIMIT 1")
+    last_trade = c.fetchone()
+    conn.close()
+
+    if last_trade:
+        return last_trade[1], last_trade[2], last_trade[3]  # cash, shares, equity
+    else:
+        return None  # If no data is present
 
 def print_trade_data_file(trade_data_file):
     if os.path.exists(trade_data_file):
@@ -84,7 +96,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             print("Waiting for database to be populated...")
             time.sleep(1)
 
-    #print(f"Database {os.path.basename(db_path)} exists and is populated.")
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']  # Assuming the current price is the latest moving average
@@ -109,11 +120,14 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
     clear_trade_data_file(trade_data_file)
     initialize_trade_data_file(trade_data_file)
-    #print_trade_data_file(trade_data_file)
 
-    # Initialize starting values for the first day
-    cash = initial_cash  # Starting cash in USD
-    shares = 0
+    # Check if there's previous data in the trades.db file
+    last_trade_data = get_last_trade_data(trade_data_file)
+    if last_trade_data:
+        cash, shares, equity = last_trade_data
+    else:
+        cash = initial_cash  # Starting cash in USD
+        shares = 0
 
     # Iterate through each simulation day
     current_date = simulate_start_date
@@ -161,7 +175,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
     print(f"Final Equity: {total_equity}")
     print(f"Total Percentage Returns: {total_returns}%")
-
 
 if len(sys.argv) != 9:
     print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash>")
