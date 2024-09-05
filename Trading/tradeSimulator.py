@@ -105,9 +105,18 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         print(f"Database for {symbol} does not exist. Creating database...")
         create_database(symbol, start_date, end_date, interval)
 
+        # Indicator states
+        indicator_states = ['   ', '.  ', '.. ', '...']
+        indicator_index = 0
+
         while not (database_exists(db_path) and check_db_populated(db_path)):
-            print("Waiting for database to be populated...")
+            sys.stdout.write(f"\rWaiting for database to be populated{indicator_states[indicator_index]}")
+            sys.stdout.flush()
             time.sleep(1)
+            indicator_index = (indicator_index + 1) % len(indicator_states)
+
+        # Clear the waiting message
+        sys.stdout.write("\rDatabase populated.                              \n")
 
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
@@ -151,7 +160,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         # Check if the market is closed on this date
         if is_market_closed(current_date_dt):
-            print(f"Market closed on {current_date}. Skipping this day.")
             current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
             continue
 

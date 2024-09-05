@@ -1,9 +1,12 @@
-import sqlite3
 import os
 import subprocess
 import sys
-from datetime import datetime
 import pytz
+import sqlite3
+from datetime import datetime, timedelta
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup')))
+from historicalDatabase import populate_database as historical_populate_database
 
 def create_database(db_path):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -18,27 +21,32 @@ def create_database(db_path):
     conn.close()
 
 def populate_database(db_path, symbol, historical, start_date, end_date=None, interval='1h'):
-    command = [sys.executable, os.path.abspath(os.path.join(os.path.dirname(__file__), "priceTracker.py")), symbol, "yes" if historical else "no", start_date]
-    if end_date:
-        command.append(end_date)
-    command.append(interval)
+    if historical:
+        # Call the updated historicalDatabase.py's populate_database function with correct arguments
+        historical_populate_database(db_path, symbol, start_date, end_date, interval)
+    else:
+        # Real-time data fetching logic goes here
+        command = [sys.executable, os.path.abspath(os.path.join(os.path.dirname(__file__), "priceTracker.py")), symbol, "no", start_date]
+        if end_date:
+            command.append(end_date)
+        command.append(interval)
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    output_lines = result.stdout.strip().split('\n')
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        output_lines = result.stdout.strip().split('\n')
 
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
 
-    for line in output_lines:
-        if line.startswith('(') and line.endswith(')'):
-            try:
-                record = eval(line)
-                c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)", record)
-                conn.commit()
-            except Exception as e:
-                print(f"Error inserting record {line}: {e}")
+        for line in output_lines:
+            if line.startswith('(') and line.endswith(')'):
+                try:
+                    record = eval(line)
+                    c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)", record)
+                    conn.commit()
+                except Exception as e:
+                    print(f"Error inserting record {line}: {e}")
 
-    conn.close()
+        conn.close()
 
 def generate_db_filename(symbol, start_date, end_date=None, interval='1h'):
     interval_str = interval.replace(' ', '').replace(':', '').replace('-', '')

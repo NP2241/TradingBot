@@ -49,12 +49,16 @@ def convert_to_12hr_format(time_str):
     dt = datetime.strptime(time_str, '%H:%M:%S')
     return dt.strftime('%I:%M:%S %p')
 
-def populate_database(db_path, symbol):
+def populate_database(db_path, symbol, start_date=None, end_date=None, interval='1m'):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=2*365)
+    if not start_date:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=2*365)
+    else:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
 
     total_days = (end_date - start_date).days
     pst = pytz.timezone('America/Los_Angeles')
@@ -81,13 +85,14 @@ def populate_database(db_path, symbol):
 
         market_data = filter_market_hours(data)
 
-        for j, entry in enumerate(market_data):
+        for entry in market_data:
             ts = entry['t'] // 1000
             dt = datetime.fromtimestamp(ts)
             price_time = convert_to_12hr_format(dt.strftime('%H:%M:%S'))
             price_date = dt.strftime('%Y-%m-%d')
             c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)",
-                      (symbol, entry['c'], entry['v'], price_time, price_date))
+              (symbol, entry['c'], entry['v'], price_time, price_date))
+
 
             progress = ((i + 1) / total_days) * 100
             elapsed_time = time.time() - start_time
@@ -103,6 +108,8 @@ def populate_database(db_path, symbol):
         time.sleep(12)  # Sleep for 12 seconds between each API call
 
     conn.close()
+    return
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

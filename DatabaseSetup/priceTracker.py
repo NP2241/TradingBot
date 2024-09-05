@@ -1,7 +1,26 @@
 import time
+import requests
 from datetime import datetime, timedelta
 import pytz
-from APIFetching import get_current_price_and_volume, get_historical_prices, is_market_open
+from APIFetching import get_current_price_and_volume, is_market_open
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from paths.env file
+dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../paths.env'))
+load_dotenv(dotenv_path)
+POLYGON_API_KEYS = os.getenv('POLYGON_API_KEYS').split(',')
+
+def fetch_historical_data(symbol, date_str, interval, api_key):
+    start_date = date_str
+    end_date = (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+    url = f'https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/{interval}/{start_date}/{end_date}'
+    params = {
+        'apiKey': api_key,
+    }
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    return response.json().get('results', [])
 
 def track_price(symbol, interval='1m'):
     data = []
@@ -28,21 +47,41 @@ def track_historical_prices(symbol, start_date, end_date=None, interval='1m'):
         end_date_dt = start_date_dt
 
     current_date = start_date_dt
+    key_index = 0  # Start with the first key
+
     while current_date <= end_date_dt:
         if current_date.weekday() >= 5:  # Skip weekends (Saturday and Sunday)
             current_date += timedelta(days=1)
             continue
 
         date_str = current_date.strftime('%Y-%m-%d')
-        prices = get_historical_prices(symbol, date_str, interval=interval)
+        while True:
+            try:
+                api_key = POLYGON_API_KEYS[key_index]
+                prices = fetch_historical_data(symbol, date_str, interval, api_key)
+                break
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:  # Too Many Requests
+                    print("\nRate limit exceeded. Switching API key...")
+                    key_index = (key_index + 1) % len(POLYGON_API_KEYS)
+                else:
+                    raise
+
         if prices is not None:
             last_price = None
-            for time_stamp, price_data in prices.iterrows():
-                price, volume = price_data['Close'], price_data['Volume']
+            for entry in prices:
+                ts = entry['t'] // 1000
+                dt = datetime.fromtimestamp(ts)
+                price_time = dt.strftime('%H:%M:%S')
+                price_date = dt.strftime('%Y-%m-%d')
+                price = entry['c']
+                volume = entry['v']
+
                 if price != last_price:
                     last_price = price
-                    record = (symbol, price, volume, time_stamp.strftime('%H:%M:%S'), time_stamp.strftime('%Y-%m-%d'))
+                    record = (symbol, price, volume, price_time, price_date)
                     data.append(record)
+
         current_date += timedelta(days=1)
     return data
 
