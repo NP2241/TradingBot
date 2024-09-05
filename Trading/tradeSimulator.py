@@ -33,8 +33,33 @@ def clear_trade_data_file(trade_data_file):
         os.remove(trade_data_file)
 
 def initialize_trade_data_file(trade_data_file):
-    with open(trade_data_file, 'w') as f:
-        f.write("date,cash,shares,equity\n")
+    os.makedirs(os.path.dirname(trade_data_file), exist_ok=True)
+
+    conn = sqlite3.connect(trade_data_file)
+    c = conn.cursor()
+
+    # Create table with the expected columns
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS trades (
+            date TEXT,
+            cash REAL,
+            shares INTEGER,
+            equity REAL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def print_trade_data_file(trade_data_file):
+    if os.path.exists(trade_data_file):
+        with open(trade_data_file, 'r') as f:
+            contents = f.readlines()
+        print(f"Contents of trade file:")
+        for line in contents:
+            print(line.strip())
+    else:
+        print(f"{trade_data_file} does not exist.")
 
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Ensure the database for the range exists
@@ -72,6 +97,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
     clear_trade_data_file(trade_data_file)
     initialize_trade_data_file(trade_data_file)
+    #print_trade_data_file(trade_data_file)
 
     # Initialize starting values for the first day
     cash = initial_cash  # Starting cash in USD
@@ -110,7 +136,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         with open(trade_data_file, 'a') as f:
             f.write(f"{current_date},{cash},{shares},{equity}\n")
-            print(current_date, " ", cash, " ", shares, " ", equity)
+            #print(current_date, " ", cash, " ", shares, " ", equity)
 
 
         current_date = (datetime.strptime(current_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
