@@ -105,7 +105,7 @@ def populate_database(db_path, symbol, start_date=None, end_date=None, interval=
         conn.commit()
 
         # Sleep to respect API rate limits (5 calls/minute)
-        time.sleep(12)  # Sleep for 12 seconds between each API call
+        #time.sleep(1)
 
     conn.close()
     return

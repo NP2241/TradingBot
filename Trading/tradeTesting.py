@@ -3,11 +3,11 @@ import os
 
 def run_trade_simulator():
     symbol = "AAPL"
-    start_date = "2024-07-01"
-    end_date = "2024-07-14"
+    start_date = "2022-10-01"
+    end_date = "2023-01-01"
     interval = "1m"
-    simulate_start_date = "2024-07-15"
-    simulate_end_date = "2024-08-30"
+    simulate_start_date = "2023-01-02"
+    simulate_end_date = "2024-01-01"
     threshold = 1  # 1% threshold within bollinger bands to trigger sells and buys
     initial_cash = 10000  # Initial cash amount
 
