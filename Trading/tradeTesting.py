@@ -2,7 +2,7 @@ import subprocess
 import os
 
 def run_trade_simulator():
-    symbol = "AMZN"
+    symbol = "SPY"
     start_date = "2022-10-01"
     end_date = "2023-01-01"
     interval = "1m"

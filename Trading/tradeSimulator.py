@@ -178,13 +178,22 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         for price, volume, date, time_ in stock_data:
             if price <= lower_band * (1 + (threshold / 100)):  # Buy condition within the specified percentage of the lower band
-                shares_to_buy = cash // price
-                if shares_to_buy > 0:
-                    shares += shares_to_buy
-                    cash -= shares_to_buy * price
-            elif price >= upper_band * (1 - (threshold / 100)) and shares > 0:  # Sell condition within the specified percentage of the upper band
-                cash += shares * price
-                shares = 0
+                if cash >= price:  # Check if there is enough money to buy one share
+                    shares += 1  # Buy only one share
+                    cash -= price  # Deduct the cost of one share from cash
+
+                    # Recalculate Bollinger Bands after the buy
+                    two_weeks_ago = datetime.strptime(date, '%Y-%m-%d') - timedelta(weeks=2)
+                    recent_data = [data for data in stock_data if datetime.strptime(data[2], '%Y-%m-%d') >= two_weeks_ago]
+                    recent_prices = [data[0] for data in recent_data]  # Assuming the first element is the price
+                    if len(recent_prices) >= 20:  # Assuming the function needs at least 20 data points
+                        lower_band, moving_average, upper_band = calculate_bollinger_bands(recent_prices)
+
+                elif price >= upper_band * (1 - (threshold / 100)) and shares > 0:  # Sell condition within the specified percentage of the upper band
+                    cash += shares * price
+                    shares = 0
+
+
 
         ending_price = stock_data[-1][0]  # Closing price on the simulation date
         equity = cash + (shares * ending_price)
