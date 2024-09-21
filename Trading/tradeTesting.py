@@ -13,7 +13,7 @@ def run_trade_simulator():
 
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'tradeSimulator.py'))
     command = [
-        "/usr/local/bin/python3",
+        "python3",
         script_path,
         symbol,
         start_date,
