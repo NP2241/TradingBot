@@ -1,116 +1,167 @@
-import requests
 import sqlite3
 import os
 import sys
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import time
+import requests
 import pytz
+import holidays  # Import for U.S. market holidays
+from dotenv import load_dotenv
 
 # Load environment variables from paths.env file
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../paths.env'))
 load_dotenv(dotenv_path)
-POLYGON_API_KEYS = os.getenv('POLYGON_API_KEYS').split(',')
 
-MARKET_OPEN_TIME = 9 * 60 + 30  # 9:30 AM in minutes
-MARKET_CLOSE_TIME = 16 * 60     # 4:00 PM in minutes
+# Get Tiingo API key from the .env file
+TIINGO_API_KEY = os.getenv('TIINGO_API_KEY')
 
+# Base URL for Tiingo REST API
+BASE_URL = "https://api.tiingo.com/iex"
+
+# Set the timezone for New York
+ny_tz = pytz.timezone('America/New_York')
+
+# Get U.S. market holidays
+us_holidays = holidays.US(years=range(1990, datetime.now().year + 1))
+
+# Function to create the database
 def create_database(db_path):
+    if os.path.exists(db_path):
+        os.remove(db_path)  # Remove the existing database to avoid conflicts
+
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS stock_prices
-                 (stock_name TEXT, stock_price REAL, volume INTEGER, price_time TEXT, price_date TEXT)''')
+
+    # Create table with correct data types
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS stock_prices (
+            stock_name TEXT,
+            stock_price REAL,
+            volume INTEGER,
+            price_time TEXT,
+            price_day TEXT
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
-def fetch_historical_data(symbol, date, api_key):
-    start_date = date.strftime('%Y-%m-%d')
-    end_date = (date + timedelta(days=1)).strftime('%Y-%m-%d')
-    url = f'https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{start_date}/{end_date}'
-    params = {
-        'apiKey': api_key,
+# Function to fetch historical intraday data from Tiingo for a specific date range
+def fetch_intraday_data_for_date_range(symbol, start_date, end_date):
+    # API endpoint for historical intraday prices with 1-minute intervals for the given date range
+    url = f"{BASE_URL}/{symbol}/prices?startDate={start_date}&endDate={end_date}&resampleFreq=1min&columns=open,high,low,close,volume&token={TIINGO_API_KEY}"
+
+    # Set up request headers (no token here as it's in the URL)
+    headers = {
+        'Content-Type': 'application/json'
     }
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    return response.json().get('results', [])
 
-def filter_market_hours(data):
-    market_data = []
-    for entry in data:
-        ts = entry['t'] // 1000
-        dt = datetime.fromtimestamp(ts)
-        total_minutes = dt.hour * 60 + dt.minute
-        if MARKET_OPEN_TIME <= total_minutes <= MARKET_CLOSE_TIME:
-            market_data.append(entry)
-    return market_data
+    print(f"Fetching data for {symbol} from {start_date} to {end_date}...")
 
-def convert_to_12hr_format(time_str):
-    dt = datetime.strptime(time_str, '%H:%M:%S')
-    return dt.strftime('%I:%M:%S %p')
+    try:
+        response = requests.get(url, headers=headers)
 
-def populate_database(db_path, symbol, start_date=None, end_date=None, interval='1m'):
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                print(f"Fetched {len(data)} records from {start_date} to {end_date}")
+                return data
+            else:
+                print(f"No data found for {start_date} to {end_date}")
+                return []
+        else:
+            print(f"Error fetching data from {start_date} to {end_date}: {response.status_code} - {response.text}")
+            return []
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred during the request: {e}")
+        return []
+
+# Convert UTC timestamp to New York time
+def convert_to_ny_time(utc_time_str):
+    """Convert UTC time string to New York local time (EST/EDT)."""
+    utc_time = datetime.strptime(utc_time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+    utc_time = utc_time.replace(tzinfo=pytz.utc)  # Set timezone to UTC
+    ny_time = utc_time.astimezone(ny_tz)  # Convert to New York time
+    return ny_time
+
+# Insert fetched data into the database
+def insert_into_database(db_path, symbol, data):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    if not start_date:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=2*365)
-    else:
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
+    # Insert fetched data into the database
+    for entry in data:
+        try:
+            stock_name = symbol
+            stock_price = entry.get('close', None)
+            volume = entry.get('volume', None)
+            date = entry.get('date', None)
 
-    total_days = (end_date - start_date).days
-    pst = pytz.timezone('America/Los_Angeles')
+            if not stock_price or not volume or not date:
+                print(f"Skipping incomplete record: {entry}")
+                continue
 
-    total_api_calls = 0
-    start_time = time.time()
-    key_index = 0  # Start with the first key
+            ny_time = convert_to_ny_time(date)  # Convert UTC to New York time
+            price_time = ny_time.strftime('%I:%M %p')  # Format time to '09:31 AM'
+            price_day = ny_time.strftime('%Y-%m-%d')  # Extract just the date (YYYY-MM-DD)
 
-    for i in range(total_days):
-        current_date = start_date + timedelta(days=i)
+            # Debugging print statement to confirm data to be inserted
+            print(f"Attempting to insert: {stock_name}, {stock_price}, {volume}, {price_time}, {price_day}")
 
-        while True:
-            try:
-                api_key = POLYGON_API_KEYS[key_index]
-                data = fetch_historical_data(symbol, current_date, api_key)
-                total_api_calls += 1
-                break
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:  # Too Many Requests
-                    print("\nRate limit exceeded. Switching API key...")
-                    key_index = (key_index + 1) % len(POLYGON_API_KEYS)
-                else:
-                    raise
+            # Insert data into the database
+            c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_day) VALUES (?, ?, ?, ?, ?)",
+                      (stock_name, stock_price, volume, price_time, price_day))
 
-        market_data = filter_market_hours(data)
+        except Exception as e:
+            print(f"Error inserting data: {e}")
 
-        for entry in market_data:
-            ts = entry['t'] // 1000
-            dt = datetime.fromtimestamp(ts)
-            price_time = convert_to_12hr_format(dt.strftime('%H:%M:%S'))
-            price_date = dt.strftime('%Y-%m-%d')
-            c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)",
-              (symbol, entry['c'], entry['v'], price_time, price_date))
-
-
-            progress = ((i + 1) / total_days) * 100
-            elapsed_time = time.time() - start_time
-            remaining_days = total_days - (i + 1)
-            estimated_total_time = elapsed_time * total_days / (i + 1)
-            estimated_completion_time = start_time + estimated_total_time
-            estimated_completion_time_pst = datetime.fromtimestamp(estimated_completion_time, pst).strftime('%Y-%m-%d %I:%M:%S %p')
-            print(f"\rProgress: {progress:.2f}% - Estimated completion time (PST): {estimated_completion_time_pst}", end='')
-
-        conn.commit()
-
-        # Sleep to respect API rate limits (5 calls/minute)
-        #time.sleep(1)
-
+    conn.commit()  # Ensure data is committed to the database
     conn.close()
-    return
 
+# Fetch intraday data starting from today and going backward until no more data is available
+def fetch_historical_data_until_exhausted(symbol):
+    # Start at the current date
+    end_date = datetime.now()
 
+    # Set up the database
+    db_filename = f"{symbol}_full_history_1min.db"
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data', db_filename))
+    create_database(db_path)
+
+    # Keep fetching data day by day until no more data is returned
+    while True:
+        start_date = end_date - timedelta(days=1)
+        start_str = start_date.strftime('%Y-%m-%d')
+        end_str = end_date.strftime('%Y-%m-%d')
+
+        # Skip weekends and U.S. holidays
+        if start_date.weekday() >= 5:  # Skip Saturdays (5) and Sundays (6)
+            print(f"Skipping weekend: {start_str}")
+            end_date = start_date
+            continue
+        if start_str in us_holidays:
+            print(f"Skipping U.S. holiday: {start_str}")
+            end_date = start_date
+            continue
+
+        # Fetch data for the day
+        daily_data = fetch_intraday_data_for_date_range(symbol, start_str, end_str)
+
+        if not daily_data:
+            print(f"Stopping data fetch. No more data available for {start_str} to {end_str}.")
+            break
+
+        # Insert the data into the database
+        insert_into_database(db_path, symbol, daily_data)
+
+        # Move the end_date back by 1 day to continue fetching earlier data
+        end_date = start_date
+        time.sleep(1)  # Pause between API calls to avoid rate limits
+
+    print(f"\nData has been saved in the database: {db_filename}")
+
+# Main function
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python historicalDatabase.py <symbol>")
@@ -118,10 +169,5 @@ if __name__ == "__main__":
 
     symbol = sys.argv[1].upper()
 
-    db_filename = f"{symbol}_2years_1m.db"
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data', db_filename))
-
-    create_database(db_path)
-    populate_database(db_path, symbol)
-
-    print(f"\nDatabase saved at: {db_filename}")
+    # Fetch historical data going back in time until no more data is available
+    fetch_historical_data_until_exhausted(symbol)
