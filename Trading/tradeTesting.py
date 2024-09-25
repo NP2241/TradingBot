@@ -3,11 +3,11 @@ import os
 
 def run_trade_simulator():
     symbol = "SPY"
-    start_date = "2022-10-01"
-    end_date = "2023-01-01"
+    start_date = "2018-08-23"
+    end_date = "2018-09-23"
     interval = "1m"
-    simulate_start_date = "2023-01-02"
-    simulate_end_date = "2024-01-01"
+    simulate_start_date = "2018-09-24"
+    simulate_end_date = "2024-09-24"
     threshold = 1  # 1% threshold within bollinger bands to trigger sells and buys
     initial_cash = 10000  # Initial cash amount
 
