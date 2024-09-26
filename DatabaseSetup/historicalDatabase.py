@@ -74,18 +74,22 @@ def fetch_intraday_data_for_date_range(symbol, start_date, end_date):
         try:
             response = requests.get(f"{url}&token={current_api_key}", headers=headers)
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+
+                if data:
+                    return data
+                else:
+                    return []
             elif response.status_code == 429:
                 current_api_key = handle_rate_limit()
                 continue
             else:
-                print(f"Error fetching data from {start_date} to {end_date}: {response.status_code} - {response.text}")
                 return []
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")
             return []
 
-# Insert data into the database
+# Insert data into the database with validation to avoid empty entries
 def insert_data_by_day(db_path, symbol, data):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -98,7 +102,7 @@ def insert_data_by_day(db_path, symbol, data):
         volume = entry.get('volume')
         date = entry.get('date')
 
-        # Check for empty data and skip invalid entries
+        # Validate the data before inserting
         if not stock_price or not volume or not date:
             continue
 
@@ -112,13 +116,13 @@ def insert_data_by_day(db_path, symbol, data):
 
     # Insert data day by day into the database
     for day in sorted(data_by_day.keys()):
-        print(f"\rInserting data for {day}", end="")
         entries = data_by_day[day]
         for entry in entries:
-            try:
-                c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_day) VALUES (?, ?, ?, ?, ?)", entry)
-            except Exception as e:
-                print(f"Error inserting data: {e}")
+            if all(entry):
+                try:
+                    c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_day) VALUES (?, ?, ?, ?, ?)", entry)
+                except Exception as e:
+                    pass
 
     conn.commit()
     conn.close()
@@ -130,74 +134,100 @@ def convert_to_ny_time(utc_time_str):
     ny_time = utc_time.astimezone(ny_tz)
     return ny_time
 
-# Fetch historical data with progressive intervals (year → month → week → day)
-def fetch_historical_data(symbol, start_date=None, end_date=None):
-    # Default to last 7 years minus one day if no date range is provided
-    if not start_date or not end_date:
-        end_date = datetime.now() - timedelta(days=1)
-        start_date = end_date - timedelta(days=365 * 7)
+# Check if a date is a trading day (not a weekend or holiday)
+def is_trading_day(date):
+    if date.weekday() >= 5 or date in us_holidays:
+        return False
+    return True
 
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
+def fetch_historical_data(symbol):
+    # Adjust start date to the actual first available date based on data
+    adjusted_start_date = adjust_start_date(symbol)
+
+    # Convert adjusted_start_date to a datetime object for consistency in comparisons
+    current_date = datetime.combine(adjusted_start_date, datetime.min.time())
 
     # Use the same database path for both historical data and simulation
-    db_path = get_db_path(symbol, start_date_str, end_date_str, interval='1m')
+    end_date = datetime.now()  # Ensure both are datetime objects
+    db_path = get_db_path(symbol, adjusted_start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), interval='1m')
 
     create_database(db_path)
 
-    current_date = start_date
+    # Ensure the first entry is fetched and inserted
+    print(f"Fetching first data point starting from {current_date}")
+    first_data = fetch_intraday_data_for_date_range(symbol, current_date.strftime('%Y-%m-%d'), current_date.strftime('%Y-%m-%d'))
+
+    if first_data:
+        insert_data_by_day(db_path, symbol, first_data)
+        print(f"First data point inserted: {first_data[0]}")
+
+    # Start with yearly intervals and adjust the interval based on remaining time to end_date
     while current_date <= end_date:
-        # Calculate the remaining time between current date and end date
         remaining_time = (end_date - current_date).days
 
-        # If more than 1 year remains, fetch data in 1-year intervals
+        # Adjust intervals based on remaining time to the end date
         if remaining_time > 365:
-            interval_days = 365
-        # If between 6 months and 1 year remains, fetch 6 months of data
-        elif remaining_time > 182:
-            interval_days = 182
-        # If between 3 months and 6 months remains, fetch 3 months of data
-        elif remaining_time > 90:
-            interval_days = 90
-        # If between 1 month and 3 months remains, fetch 1 month of data
-        elif remaining_time > 30:
-            interval_days = 30
-        # If between 1 week and 1 month remains, fetch 1 week of data
-        elif remaining_time > 7:
-            interval_days = 7
-        # If 1 week or less remains, fetch 1 day of data at a time
+            interval_days = 365  # 1 year
+        elif remaining_time > 182:  # Between 6 months and 1 year
+            interval_days = 182  # 6 months
+            print("Switching to 6-month intervals.")
+        elif remaining_time > 90:  # Between 3 months and 6 months
+            interval_days = 90  # 3 months
+            print("Switching to 3-month intervals.")
+        elif remaining_time > 30:  # Between 1 month and 3 months
+            interval_days = 30  # 1 month
+            print("Switching to 1-month intervals.")
+        elif remaining_time > 7:  # Between 1 week and 1 month
+            interval_days = 7  # 1 week
+            print("Switching to 1-week intervals.")
         else:
-            interval_days = 1
+            interval_days = 1  # 1 day
+            print("Switching to 1-day intervals.")
 
         next_date = current_date + timedelta(days=interval_days)
+
         if next_date > end_date:
             next_date = end_date
 
         current_date_str = current_date.strftime('%Y-%m-%d')
         next_date_str = next_date.strftime('%Y-%m-%d')
 
-        print(f"Attempting to fetch data from {current_date_str} to {next_date_str} (Interval: {interval_days} days)")
+        print(f"Fetching data from {current_date_str} to {next_date_str} (Interval: {interval_days} days)")
         data = fetch_intraday_data_for_date_range(symbol, current_date_str, next_date_str)
 
         if data:
             insert_data_by_day(db_path, symbol, data)
+            print(f"Data inserted for {current_date_str} to {next_date_str}.")
         else:
-            print(f"\nNo data found for {current_date_str}. Trying a smaller range...")
+            break
 
-        # Move to the next valid trading day
-        current_date = next_date + timedelta(days=1)
+        current_date = next_date + timedelta(days=1)  # Move to the next valid day
 
-    print(f"\nData inserted for the range: {start_date_str} to {end_date_str}")
+    print(f"\nAll available data inserted for {symbol}.")
     print(f"\nData saved in database: {db_path}")
+
+# Adjust start date to the first available date
+def adjust_start_date(symbol):
+    start_date = datetime(2000, 1, 1)
+
+    while True:
+        end_date = start_date + timedelta(days=365)  # 1 year interval
+        print(f"Checking for data from {start_date.year}")
+        data = fetch_intraday_data_for_date_range(symbol, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+
+        if data:
+            first_entry = data[0]
+            actual_start_date = datetime.strptime(first_entry['date'], "%Y-%m-%dT%H:%M:%S.%fZ").date()
+            print(f"First available data found starting from {actual_start_date}. First entry: {first_entry}")
+            return actual_start_date  # Return as a date object
+        else:
+            start_date = end_date  # Move to the next year
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:
         symbol = sys.argv[1].upper()
         fetch_historical_data(symbol)
-    elif len(sys.argv) == 4:
-        symbol = sys.argv[1].upper()
-        start_date = datetime.strptime(sys.argv[2], '%Y-%m-%d')
-        end_date = datetime.strptime(sys.argv[3], '%Y-%m-%d')
-        fetch_historical_data(symbol, start_date, end_date)
     else:
-        print("Usage: python historicalDatabase.py <symbol> [<start_date> <end_date>]")
+        print("Usage: python historicalDatabase.py <symbol>")

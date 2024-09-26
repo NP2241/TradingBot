@@ -11,27 +11,36 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../Data
 from stockAnalysis import calculate_buy_index, get_db_path, database_exists, create_database, check_db_populated, calculate_stock_analysis
 from stockMetrics import calculate_bollinger_bands
 
-# This function creates the historical database
-def create_simulation_database(symbol, start_date, end_date):
+# This function creates the historical database for the full range if none exists
+def create_full_range_database(symbol):
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup/historicalDatabase.py'))
-    command = [sys.executable, script_path, symbol, start_date, end_date]
+    command = [sys.executable, script_path, symbol]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode == 0:
-        print(f"Database for {symbol} created from {start_date} to {end_date}.")
+        print(f"Full range database for {symbol} created.")
     else:
-        print(f"Error creating database for {symbol} from {start_date} to {end_date}: {result.stderr}")
+        print(f"Error creating database for {symbol}: {result.stderr}")
 
-# Ensure the historical database exists
-def ensure_database_exists(symbol, start_date, end_date):
-    db_path = get_db_path(symbol, start_date, end_date, '1m')
-    if not database_exists(db_path):
-        print(f"Database for {symbol} does not exist. Creating it from {start_date} to {end_date}...")
-        create_simulation_database(symbol, start_date, end_date)
+# Check if a database for the symbol exists (ignoring date ranges)
+def find_existing_symbol_db(symbol):
+    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data'))
+    for file in os.listdir(data_dir):
+        if file.startswith(symbol) and file.endswith('.db'):
+            return os.path.join(data_dir, file)
+    return None
 
-        # Display waiting status on a single line, updated continuously
+# Ensure a database exists for the symbol, creating it if necessary
+def ensure_database_exists_for_symbol(symbol):
+    db_path = find_existing_symbol_db(symbol)
+    if not db_path:
+        print(f"No existing database for {symbol}. Creating full-range database...")
+        create_full_range_database(symbol)
+        db_path = find_existing_symbol_db(symbol)
+
+        # Display waiting status until the database is created and populated
         indicator_states = ['|', '/', '-', '\\']
         indicator_index = 0
-        while not (database_exists(db_path) and check_db_populated(db_path)):
+        while not (db_path and check_db_populated(db_path)):
             sys.stdout.write(f"\rWaiting for database to be populated {indicator_states[indicator_index]}")
             sys.stdout.flush()
             time.sleep(1)
@@ -97,9 +106,10 @@ def get_last_trade_data(trade_data_file):
         return None  # If no data is present
 
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
-    db_path = ensure_database_exists(symbol, start_date, simulate_end_date)
+    # Ensure a database exists for the symbol (full range)
+    db_path = ensure_database_exists_for_symbol(symbol)
 
-    # Perform analysis on data from start_date to end_date
+    # Perform analysis on the data
     volatility_index, metrics = calculate_stock_analysis(db_path)
     if volatility_index is not None and metrics is not None:
         current_price = metrics['moving_average_value']
@@ -111,16 +121,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     lower_band = min(metrics['lower_band'], metrics['upper_band'])
     upper_band = max(metrics['lower_band'], metrics['upper_band'])
 
-    simulate_db_path = get_db_path(symbol, simulate_start_date, simulate_end_date, interval)
-    if not database_exists(simulate_db_path):
-        print(f"Creating simulation database for {symbol} from {simulate_start_date} to {simulate_end_date}...")
-        create_simulation_database(symbol, simulate_start_date, simulate_end_date)
-
-    while not (database_exists(simulate_db_path) and check_table_exists(simulate_db_path)):
-        sys.stdout.write(f"\rWaiting for simulation database to be populated...")
-        sys.stdout.flush()
-        time.sleep(1)
-
+    # Start simulation
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
     clear_trade_data_file(trade_data_file)
     initialize_trade_data_file(trade_data_file)
@@ -137,9 +138,9 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
             continue
 
-        conn = sqlite3.connect(simulate_db_path)
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT stock_price, volume, price_date, price_time FROM stock_prices WHERE price_date = ?", (current_date,))
+        c.execute("SELECT stock_price, volume, price_day, price_time FROM stock_prices WHERE price_day = ?", (current_date,))
         stock_data = c.fetchall()
         conn.close()
 
