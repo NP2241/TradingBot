@@ -3,13 +3,13 @@ import os
 
 def run_trade_simulator():
     symbol = "SPY"
-    start_date = "2017-08-23"
-    end_date = "2017-09-23"
+    start_date = "2018-12-01"
+    end_date = "2019-01-01"
     interval = "1m"
-    simulate_start_date = "2017-09-24"
+    simulate_start_date = "2019-01-02"
     simulate_end_date = "2024-09-24"
     threshold = 1  # 1% threshold within bollinger bands to trigger sells and buys
-    initial_cash = 10000  # Initial cash amount
+    initial_cash = 100000  # Initial cash amount
 
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'tradeSimulator.py'))
     command = [

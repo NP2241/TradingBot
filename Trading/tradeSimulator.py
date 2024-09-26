@@ -2,24 +2,13 @@ import os
 import sys
 import sqlite3
 import time
-import subprocess
 from datetime import datetime, timedelta
 import holidays
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../DataAnalysis')))
 
-from stockAnalysis import calculate_buy_index, get_db_path, database_exists, create_database, check_db_populated, calculate_stock_analysis
+from stockAnalysis import calculate_buy_index, database_exists, calculate_stock_analysis
 from stockMetrics import calculate_bollinger_bands
-
-# This function creates the historical database for the full range if none exists
-def create_full_range_database(symbol):
-    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../DatabaseSetup/historicalDatabase.py'))
-    command = [sys.executable, script_path, symbol]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if result.returncode == 0:
-        print(f"Full range database for {symbol} created.")
-    else:
-        print(f"Error creating database for {symbol}: {result.stderr}")
 
 # Check if a database for the symbol exists (ignoring date ranges)
 def find_existing_symbol_db(symbol):
@@ -29,26 +18,18 @@ def find_existing_symbol_db(symbol):
             return os.path.join(data_dir, file)
     return None
 
-# Ensure a database exists for the symbol, creating it if necessary
-def ensure_database_exists_for_symbol(symbol):
-    db_path = find_existing_symbol_db(symbol)
-    if not db_path:
-        print(f"No existing database for {symbol}. Creating full-range database...")
-        create_full_range_database(symbol)
-        db_path = find_existing_symbol_db(symbol)
+# Find the actual start and end dates in the database
+def get_db_start_end_dates(db_path):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
 
-        # Display waiting status until the database is created and populated
-        indicator_states = ['|', '/', '-', '\\']
-        indicator_index = 0
-        while not (db_path and check_db_populated(db_path)):
-            sys.stdout.write(f"\rWaiting for database to be populated {indicator_states[indicator_index]}")
-            sys.stdout.flush()
-            time.sleep(1)
-            indicator_index = (indicator_index + 1) % len(indicator_states)
+    # Find the minimum (start) and maximum (end) price_day in the database
+    c.execute("SELECT MIN(price_day), MAX(price_day) FROM stock_prices")
+    start_date, end_date = c.fetchone()
 
-        # Clear the waiting message
-        sys.stdout.write("\rDatabase populated successfully.                           \n")
-    return db_path
+    conn.close()
+
+    return start_date, end_date
 
 def check_table_exists(db_path):
     conn = sqlite3.connect(db_path)
@@ -105,21 +86,61 @@ def get_last_trade_data(trade_data_file):
     else:
         return None  # If no data is present
 
-def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
-    # Ensure a database exists for the symbol (full range)
-    db_path = ensure_database_exists_for_symbol(symbol)
+def simulate_trading(symbol, start_date, end_date, simulate_start_date, simulate_end_date, threshold, initial_cash):
+    # Check if a database for the symbol exists
+    db_path = find_existing_symbol_db(symbol)
+    if not db_path:
+        print(f"No existing database for {symbol}. Exiting.")
+        sys.exit(1)
 
-    # Perform analysis on the data
-    volatility_index, metrics = calculate_stock_analysis(db_path)
-    if volatility_index is not None and metrics is not None:
-        current_price = metrics['moving_average_value']
-        buy_index = calculate_buy_index(volatility_index, metrics, current_price)
+    print(f"Using database for {symbol}: {db_path}")
+
+    # Check that the table exists in the database
+    if not check_table_exists(db_path):
+        print(f"No valid stock_prices table found in database {db_path}. Exiting.")
+        sys.exit(1)
+
+    # Find the actual start_date and end_date in the database
+    db_start_date, db_end_date = get_db_start_end_dates(db_path)
+    print(f"Database contains data from {db_start_date} to {db_end_date}")
+
+    # Ensure the start_date and end_date are within the actual data range
+    if start_date < db_start_date:
+        print(f"Analysis start date is earlier than available data. Adjusting to {db_start_date}")
+        start_date = db_start_date
+
+    if end_date > db_end_date:
+        print(f"Analysis end date is later than available data. Adjusting to {db_end_date}")
+        end_date = db_end_date
+
+    # Ensure the simulation start and end dates are within the actual data range
+    if simulate_start_date < db_start_date:
+        print(f"Simulation start date is earlier than available data. Adjusting to {db_start_date}")
+        simulate_start_date = db_start_date
+
+    if simulate_end_date > db_end_date:
+        print(f"Simulation end date is later than available data. Adjusting to {db_end_date}")
+        simulate_end_date = db_end_date
+
+    # Perform analysis on data from start_date to end_date (initial calculations)
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("SELECT stock_price FROM stock_prices WHERE price_day BETWEEN ? AND ?", (start_date, end_date))
+    analysis_data = c.fetchall()
+    conn.close()
+
+    if analysis_data:
+        recent_prices = [row[0] for row in analysis_data]
+        if len(recent_prices) >= 20:
+            lower_band, moving_average, upper_band = calculate_bollinger_bands(recent_prices)
+        else:
+            print("Not enough data to calculate Bollinger Bands.")
+            return
     else:
-        print("No data available to calculate stock analysis.")
+        print(f"No data available for analysis between {start_date} and {end_date}")
         return
 
-    lower_band = min(metrics['lower_band'], metrics['upper_band'])
-    upper_band = max(metrics['lower_band'], metrics['upper_band'])
+    print(f"Bollinger Bands: Lower = {lower_band}, Moving Average = {moving_average}, Upper = {upper_band}")
 
     # Start simulation
     trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
@@ -177,17 +198,16 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     print(f"Total Percentage Returns: {total_returns}%")
 
 # Main program entry point
-if len(sys.argv) != 9:
+if len(sys.argv) == 9:
+    symbol = sys.argv[1].upper()
+    start_date = sys.argv[2].strip()
+    end_date = sys.argv[3].strip()
+    interval = sys.argv[4].strip()
+    simulate_start_date = sys.argv[5].strip()
+    simulate_end_date = sys.argv[6].strip()
+    threshold = float(sys.argv[7].strip())
+    initial_cash = float(sys.argv[8].strip())
+
+    simulate_trading(symbol, start_date, end_date, simulate_start_date, simulate_end_date, threshold, initial_cash)
+else:
     print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash>")
-    sys.exit(1)
-
-symbol = sys.argv[1].upper()
-start_date = sys.argv[2].strip()
-end_date = sys.argv[3].strip()
-interval = sys.argv[4].strip()
-simulate_start_date = sys.argv[5].strip()
-simulate_end_date = sys.argv[6].strip()
-threshold = float(sys.argv[7].strip())
-initial_cash = float(sys.argv[8].strip())
-
-simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash)
