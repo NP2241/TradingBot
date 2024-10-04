@@ -14,13 +14,13 @@ def is_trading_day(date):
         return False
     return True
 
-# Function to get the list of dates from the database
+# Function to get the list of distinct trading days from the database
 def get_dates_from_db(db_path):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    # Query to get all distinct price_day entries from the stock_prices table
-    c.execute("SELECT DISTINCT price_day FROM stock_prices ORDER BY price_day ASC")
+    # Query to get all distinct price_date entries from the stock_prices table
+    c.execute("SELECT DISTINCT price_date FROM stock_prices ORDER BY price_date ASC")
     dates = c.fetchall()
 
     conn.close()
@@ -28,7 +28,7 @@ def get_dates_from_db(db_path):
     # Convert the tuples into a list of datetime.date objects
     return [datetime.strptime(row[0], '%Y-%m-%d').date() for row in dates]
 
-# Function to calculate the expected number of trading days
+# Function to calculate the expected number of trading days between two dates
 def calculate_expected_trading_days(start_date, end_date):
     current_date = start_date
     expected_trading_days = 0
@@ -40,7 +40,7 @@ def calculate_expected_trading_days(start_date, end_date):
 
     return expected_trading_days
 
-# Function to get the duration in months and days
+# Function to get the duration in months and days between two dates
 def get_duration(start, end):
     delta = relativedelta(end, start)
     months = delta.months
@@ -56,12 +56,14 @@ def validate_database(db_name):
         print(f"Database file not found: {db_name}")
         return
 
+    # Fetch distinct trading days from the database
     dates = get_dates_from_db(db_path)
 
     if not dates:
         print("No data found in the database.")
         return
 
+    # Define the start and end dates of the data in the database
     start_date = dates[0]
     end_date = dates[-1]
     print(f"First data entry: {start_date}")
@@ -70,7 +72,7 @@ def validate_database(db_name):
     missing_ranges = []
     current_date = start_date
 
-    # Loop through all dates and find missing trading days
+    # Loop through the dates and identify any gaps larger than 1 trading day
     for i in range(1, len(dates)):
         next_date = dates[i]
         day_diff = (next_date - current_date).days
@@ -84,14 +86,19 @@ def validate_database(db_name):
                 if is_trading_day(potential_missing_date):
                     missing_days.append(potential_missing_date)
 
+            # If we found any missing trading days, add them to the missing ranges
             if missing_days:
+                print(f"Found missing days: {[day.strftime('%Y-%m-%d') for day in missing_days]}")  # Print missing days
                 missing_ranges.append((current_date, next_date))
 
         current_date = next_date
 
-    # Calculate expected vs actual trading days
+    # Calculate expected vs. actual trading days
     expected_trading_days = calculate_expected_trading_days(start_date, end_date)
     actual_trading_days = len(dates)
+
+    print(f"Expected trading days between {start_date} and {end_date}: {expected_trading_days}")
+    print(f"Actual trading days in database: {actual_trading_days}")
 
     coverage_percentage = (actual_trading_days / expected_trading_days) * 100
 
@@ -104,9 +111,7 @@ def validate_database(db_name):
     else:
         print("No missing data found.")
 
-    print(f"\nExpected trading days: {expected_trading_days}")
-    print(f"Actual trading days in database: {actual_trading_days}")
-    print(f"Data coverage: {coverage_percentage:.2f}%")
+    print(f"\nData coverage: {coverage_percentage:.2f}%")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
