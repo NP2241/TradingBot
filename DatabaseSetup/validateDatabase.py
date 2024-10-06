@@ -10,12 +10,16 @@ us_holidays = holidays.US()
 
 # Function to check if a given date is a trading day
 def is_trading_day(date):
-    if date.weekday() >= 5 or date in us_holidays:  # Weekend or US holiday
-        return False
-    return True
+    """
+    Returns True if the given date is a trading day (not a weekend or US holiday).
+    """
+    return date.weekday() < 5 and date not in us_holidays
 
 # Function to get the list of distinct trading days from the database
 def get_dates_from_db(db_path):
+    """
+    Retrieve the list of distinct trading days from the database.
+    """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
@@ -30,6 +34,9 @@ def get_dates_from_db(db_path):
 
 # Function to calculate the expected number of trading days between two dates
 def calculate_expected_trading_days(start_date, end_date):
+    """
+    Calculate the number of expected trading days (excluding weekends and holidays) between two dates.
+    """
     current_date = start_date
     expected_trading_days = 0
 
@@ -42,13 +49,40 @@ def calculate_expected_trading_days(start_date, end_date):
 
 # Function to get the duration in months and days between two dates
 def get_duration(start, end):
+    """
+    Get the duration between two dates in months and days.
+    """
     delta = relativedelta(end, start)
     months = delta.months
     days = delta.days
     return months, days
 
-# Function to validate the database for missing data
+# Function to check for exact duplicate entries in the database
+def find_exact_duplicates(db_path):
+    """
+    Check the database for any exact duplicate entries.
+    """
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # Query to find exact duplicate rows based on all fields except primary key
+    c.execute("""
+        SELECT stock_name, stock_price, volume, price_time, price_date, COUNT(*) as count 
+        FROM stock_prices 
+        GROUP BY stock_name, stock_price, volume, price_time, price_date 
+        HAVING count > 1
+    """)
+    duplicates = c.fetchall()
+
+    conn.close()
+
+    return duplicates
+
+# Function to validate the database for missing and duplicate data
 def validate_database(db_name):
+    """
+    Validate the database for missing and exact duplicate trading days.
+    """
     # Construct the full path to the database file assuming it's in the data/ folder
     db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', db_name))
 
@@ -93,23 +127,32 @@ def validate_database(db_name):
 
         current_date = next_date
 
+    # Check for exact duplicate entries
+    duplicates = find_exact_duplicates(db_path)
+    if duplicates:
+        print("\nExact duplicate data found for the following entries:")
+        for stock_name, stock_price, volume, price_time, price_date, count in duplicates:
+            print(f" - {stock_name} on {price_date} at {price_time} with price {stock_price} and volume {volume}: {count} entries")
+    else:
+        print("\nNo exact duplicate data found.")
+
     # Calculate expected vs. actual trading days
     expected_trading_days = calculate_expected_trading_days(start_date, end_date)
     actual_trading_days = len(dates)
 
-    print(f"Expected trading days between {start_date} and {end_date}: {expected_trading_days}")
+    print(f"\nExpected trading days between {start_date} and {end_date}: {expected_trading_days}")
     print(f"Actual trading days in database: {actual_trading_days}")
 
     coverage_percentage = (actual_trading_days / expected_trading_days) * 100
 
     # Print out the missing ranges with months and days
     if missing_ranges:
-        print("Missing data found in the following ranges (excluding weekends and holidays):")
+        print("\nMissing data found in the following ranges (excluding weekends and holidays):")
         for start, end in missing_ranges:
             months, days = get_duration(start, end)
             print(f"Gap between {start} and {end} (Duration: {months} months, {days} days)")
     else:
-        print("No missing data found.")
+        print("\nNo missing data found.")
 
     print(f"\nData coverage: {coverage_percentage:.2f}%")
 

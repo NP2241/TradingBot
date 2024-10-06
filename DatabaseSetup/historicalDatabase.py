@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import time
 import pytz
+import holidays
 
 # Load environment variables from paths.env file
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../paths.env'))
@@ -16,6 +17,9 @@ MARKET_OPEN_TIME = 9 * 60 + 30  # 9:30 AM in minutes
 MARKET_CLOSE_TIME = 16 * 60     # 4:00 PM in minutes
 
 def create_database(db_path):
+    """
+    Create the stock prices database if it doesn't exist.
+    """
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -50,10 +54,25 @@ def filter_market_hours(data):
     return market_data
 
 def convert_to_12hr_format(time_str):
+    """
+    Convert a time string to 12-hour format.
+    """
     dt = datetime.strptime(time_str, '%H:%M:%S')
     return dt.strftime('%I:%M:%S %p')
 
+def record_exists(c, symbol, price, volume, time, date):
+    """
+    Check if a record already exists in the database to prevent duplicates.
+    """
+    query = """SELECT 1 FROM stock_prices WHERE 
+               stock_name = ? AND stock_price = ? AND volume = ? AND price_time = ? AND price_date = ?"""
+    c.execute(query, (symbol, price, volume, time, date))
+    return c.fetchone() is not None
+
 def populate_database(db_path, symbol, start_date=None, end_date=None, interval='1m'):
+    """
+    Populate the database with historical stock prices.
+    """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
@@ -73,6 +92,11 @@ def populate_database(db_path, symbol, start_date=None, end_date=None, interval=
     # Iterate through each day individually
     current_date = start_date
     while current_date <= end_date:
+        # Skip weekends and holidays
+        if current_date.weekday() >= 5 or current_date in holidays.US():
+            current_date += timedelta(days=1)
+            continue
+
         try:
             api_key = POLYGON_API_KEYS[key_index]
             data = fetch_historical_data(symbol, current_date, api_key)
@@ -88,17 +112,20 @@ def populate_database(db_path, symbol, start_date=None, end_date=None, interval=
             if len(market_data) == 0:
                 print(f"No data fetched for {symbol} on {current_date.strftime('%Y-%m-%d')}. This could indicate a problem with the data or API.")
 
-            # Insert the data into the database
+            # Insert the data into the database, checking for duplicates first
             for entry in market_data:
                 ts = entry['t'] // 1000
                 dt = datetime.fromtimestamp(ts)
                 price_time = convert_to_12hr_format(dt.strftime('%H:%M:%S'))
                 price_date = dt.strftime('%Y-%m-%d')
-                try:
-                    c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)",
-                              (symbol, entry['c'], entry['v'], price_time, price_date))
-                except sqlite3.Error as e:
-                    print(f"Failed to insert data for {symbol} on {price_date}: {e}")
+
+                # Check if the entry already exists to prevent duplicates
+                if not record_exists(c, symbol, entry['c'], entry['v'], price_time, price_date):
+                    try:
+                        c.execute("INSERT INTO stock_prices (stock_name, stock_price, volume, price_time, price_date) VALUES (?, ?, ?, ?, ?)",
+                                  (symbol, entry['c'], entry['v'], price_time, price_date))
+                    except sqlite3.Error as e:
+                        print(f"Failed to insert data for {symbol} on {price_date}: {e}")
 
             conn.commit()
 
