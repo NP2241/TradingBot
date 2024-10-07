@@ -97,43 +97,6 @@ def get_last_trade_data(equity_file):
 
 
 
-def initialize_trade_summary_file(trades_file):
-    """
-    Initializes the trade summary file with columns: date, profit, and win_percent.
-    """
-    os.makedirs(os.path.dirname(trades_file), exist_ok=True)
-
-    conn = sqlite3.connect(trades_file)
-    c = conn.cursor()
-
-    # Create the new table structure with only the necessary columns
-    c.execute(f'''
-        CREATE TABLE IF NOT EXISTS {symbol}_trades (
-            date TEXT,
-            profit REAL,
-            win_percent REAL
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
-def write_daily_summary_to_db(trades_file, date, daily_profit, win_percentage):
-    """
-    Writes the daily summary for trading activity into the trades table.
-    The summary includes date, profit, and win percentage.
-    """
-    conn = sqlite3.connect(trades_file)
-    c = conn.cursor()
-
-    # Insert only the date, profit, and win% into the table
-    c.execute(f"INSERT INTO {symbol}_trades (date, profit, win_percent) VALUES (?, ?, ?)",
-              (date, daily_profit, win_percentage))
-
-    conn.commit()
-    conn.close()
-
-
 # Function to calculate weighted average for given prices and weights
 def calculate_weighted_average(prices, weights):
     """
@@ -164,6 +127,44 @@ def calculate_weighted_bollinger_bands(prices, window=14):
     lower_band = weighted_moving_average - (weighted_std_dev * 2)
 
     return lower_band, weighted_moving_average, upper_band
+
+
+def initialize_trade_summary_file(trades_file):
+    """
+    Initializes the trade summary file with columns: date, profit, winning_sells, and losing_sells.
+    """
+    os.makedirs(os.path.dirname(trades_file), exist_ok=True)
+
+    conn = sqlite3.connect(trades_file)
+    c = conn.cursor()
+
+    # Create the new table structure with the correct column names
+    c.execute(f'''
+        CREATE TABLE IF NOT EXISTS {symbol}_trades (
+            date TEXT,
+            profit REAL,
+            winning_sells REAL,
+            losing_sells REAL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, losing_sells):
+    """
+    Writes the daily summary for trading activity into the trades table.
+    The summary includes date, profit, winning sells, and losing sells.
+    """
+    conn = sqlite3.connect(trades_file)
+    c = conn.cursor()
+
+    # Insert the date, profit, winning sells, and losing sells into the table
+    c.execute(f"INSERT INTO {symbol}_trades (date, profit, winning_sells, losing_sells) VALUES (?, ?, ?, ?)",
+              (date, daily_profit, winning_sells, losing_sells))
+
+    conn.commit()
+    conn.close()
 
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Step 1: Create a single database covering from start_date to simulate_end_date
@@ -219,20 +220,18 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         cash = initial_cash
         shares = 0
 
-    # Initialize purchase history
+    # Initialize variables to track buy/sell cycles
     purchase_history = []  # Track (price, quantity) for each buy trade
+    total_trades = 0  # Track total number of trades made
+    daily_profit = 0  # Track profit for the day
 
     current_date = simulate_start_date
     prev_closing_equity = cash
     missing_dates = []  # Track missing dates
 
     # Variables to track daily and cumulative performance
-    total_trades = 0  # Track total number of trades made
-    daily_buy_count = 0
-    daily_sell_count = 0
-    daily_profit = 0  # Track profit for the day
-    win_count = 0  # Number of winning sells for the day
-    loss_count = 0  # Number of losing sells for the day
+    winning_sells = 0  # Track total value of profitable sells for the day
+    losing_sells = 0  # Track total value of unprofitable sells for the day
 
     while current_date <= simulate_end_date:
         current_date_dt = datetime.strptime(current_date, '%Y-%m-%d')
@@ -253,10 +252,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         # Reset daily statistics
         daily_profit = 0
-        daily_buy_count = 0
-        daily_sell_count = 0
-        win_count = 0
-        loss_count = 0
+        winning_sells = 0
+        losing_sells = 0
 
         # Track purchase details for profit calculation
         for price, volume, date, time_ in stock_data:
@@ -270,7 +267,6 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
                 # Track the purchase in history
                 purchase_history.append((price, shares_to_buy))
-                daily_buy_count += 1
 
                 total_trades += 1  # Increment trade count for buy
 
@@ -288,13 +284,12 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
                 shares = 0
 
                 daily_profit += profit  # Update daily profit
-                daily_sell_count += 1
 
-                # Update daily win/loss count
+                # Update winning/losing sells based on profit
                 if profit > 0:
-                    win_count += 1
+                    winning_sells += profit  # Add to winning sells
                 else:
-                    loss_count += 1
+                    losing_sells += profit  # Add to losing sells
 
                 total_trades += 1  # Increment trade count for sell
 
@@ -302,15 +297,8 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             historical_prices.append(price)  # Include this minute's price in historical prices
             lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)  # Recalculate with new price
 
-        # Calculate daily win percentage
-        total_sells = win_count + loss_count
-        if total_sells > 0:
-            daily_win_percentage = (win_count / total_sells) * 100
-        else:
-            daily_win_percentage = 0  # No trades today, set win percentage to 0
-
         # Write a single summary entry for the day in `trades.db`
-        write_daily_summary_to_db(trades_file, current_date, daily_profit, daily_win_percentage)
+        write_daily_summary_to_db(trades_file, current_date, daily_profit, winning_sells, losing_sells)
 
         # Write end-of-day equity data
         ending_price = stock_data[-1][0]
