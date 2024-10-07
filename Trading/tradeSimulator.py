@@ -6,8 +6,8 @@ import subprocess
 from datetime import datetime, timedelta
 import holidays
 
+# Import necessary functions and modules from other scripts
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../DataAnalysis')))
-
 from stockAnalysis import calculate_buy_index, get_db_path, database_exists, create_database, check_db_populated, calculate_stock_analysis
 from stockMetrics import calculate_bollinger_bands, calculate_volatility_index, calculate_stock_metrics
 
@@ -50,7 +50,7 @@ def initialize_trade_data_file(trade_data_file):
     c = conn.cursor()
 
     c.execute('''
-        CREATE TABLE IF NOT EXISTS trades (
+        CREATE TABLE IF NOT EXISTS equity (
             date TEXT,
             cash REAL,
             shares INTEGER,
@@ -65,7 +65,7 @@ def write_trade_to_db(trade_data_file, current_date, cash, shares, equity):
     conn = sqlite3.connect(trade_data_file)
     c = conn.cursor()
 
-    c.execute("INSERT INTO trades (date, cash, shares, equity) VALUES (?, ?, ?, ?)",
+    c.execute("INSERT INTO equity (date, cash, shares, equity) VALUES (?, ?, ?, ?)",
               (current_date, cash, shares, equity))
 
     conn.commit()
@@ -75,7 +75,7 @@ def get_last_trade_data(trade_data_file):
     conn = sqlite3.connect(trade_data_file)
     c = conn.cursor()
 
-    c.execute("SELECT date, cash, shares, equity FROM trades ORDER BY date DESC LIMIT 1")
+    c.execute("SELECT date, cash, shares, equity FROM equity ORDER BY date DESC LIMIT 1")
     last_trade = c.fetchone()
     conn.close()
 
@@ -142,11 +142,12 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     simulate_db_conn = sqlite3.connect(full_db_path)
     simulate_cursor = simulate_db_conn.cursor()
 
-    trade_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
-    clear_trade_data_file(trade_data_file)
-    initialize_trade_data_file(trade_data_file)
+    # Set the new file name for equity tracking
+    equity_data_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/equity.db')
+    clear_trade_data_file(equity_data_file)
+    initialize_trade_data_file(equity_data_file)
 
-    last_trade_data = get_last_trade_data(trade_data_file)
+    last_trade_data = get_last_trade_data(equity_data_file)
     if last_trade_data:
         cash, shares, equity = last_trade_data
     else:
@@ -190,7 +191,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         returns_percentage = ((equity - prev_closing_equity) / prev_closing_equity) * 100
         prev_closing_equity = equity
 
-        write_trade_to_db(trade_data_file, current_date, cash, shares, equity)
+        write_trade_to_db(equity_data_file, current_date, cash, shares, equity)
 
         current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
