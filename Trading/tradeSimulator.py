@@ -131,7 +131,7 @@ def calculate_weighted_bollinger_bands(prices, window=14):
 
 def initialize_trade_summary_file(trades_file):
     """
-    Initializes the trade summary file with columns: date, profit, winning_sells, and losing_sells.
+    Initializes the trade summary file with columns: date, profit, winning_sells, losing_sells, and daily_success_percent.
     """
     os.makedirs(os.path.dirname(trades_file), exist_ok=True)
 
@@ -144,7 +144,8 @@ def initialize_trade_summary_file(trades_file):
             date TEXT,
             profit REAL,
             winning_sells REAL,
-            losing_sells REAL
+            losing_sells REAL,
+            daily_success_percent REAL
         )
     ''')
 
@@ -154,14 +155,20 @@ def initialize_trade_summary_file(trades_file):
 def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, losing_sells):
     """
     Writes the daily summary for trading activity into the trades table.
-    The summary includes date, profit, winning sells, and losing sells.
+    The summary includes date, profit, winning sells, losing sells, and daily success percentage.
     """
+    # Calculate daily success percentage based on winning and losing sells
+    if winning_sells + abs(losing_sells) > 0:
+        daily_success_percent = ((winning_sells - abs(losing_sells)) / (winning_sells + abs(losing_sells))) * 100
+    else:
+        daily_success_percent = 0  # No trades or equal wins/losses
+
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Insert the date, profit, winning sells, and losing sells into the table
-    c.execute(f"INSERT INTO {symbol}_trades (date, profit, winning_sells, losing_sells) VALUES (?, ?, ?, ?)",
-              (date, daily_profit, winning_sells, losing_sells))
+    # Insert the date, profit, winning sells, losing sells, and daily success percentage into the table
+    c.execute(f"INSERT INTO {symbol}_trades (date, profit, winning_sells, losing_sells, daily_success_percent) VALUES (?, ?, ?, ?, ?)",
+              (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
 
     conn.commit()
     conn.close()
@@ -250,7 +257,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
             continue
 
-        # Reset daily statistics
+        # Reset daily statistics at the start of each day
         daily_profit = 0
         winning_sells = 0
         losing_sells = 0
