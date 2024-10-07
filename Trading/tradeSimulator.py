@@ -152,26 +152,21 @@ def initialize_trade_summary_file(trades_file):
     conn.commit()
     conn.close()
 
-def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, losing_sells):
+def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, losing_sells, daily_success_percent):
     """
     Writes the daily summary for trading activity into the trades table.
-    The summary includes date, profit, winning sells, losing sells, and daily success percentage.
+    The summary includes date, daily profit, total winning sells, total losing sells, and daily success percent.
     """
-    # Calculate daily success percentage based on winning and losing sells
-    if winning_sells + abs(losing_sells) > 0:
-        daily_success_percent = ((winning_sells - abs(losing_sells)) / (winning_sells + abs(losing_sells))) * 100
-    else:
-        daily_success_percent = 0  # No trades or equal wins/losses
-
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Insert the date, profit, winning sells, losing sells, and daily success percentage into the table
+    # Insert the new columns for date, profit, winning_sells, losing_sells, and daily success percentage
     c.execute(f"INSERT INTO {symbol}_trades (date, profit, winning_sells, losing_sells, daily_success_percent) VALUES (?, ?, ?, ?, ?)",
               (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
 
     conn.commit()
     conn.close()
+
 
 def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Step 1: Create a single database covering from start_date to simulate_end_date
@@ -269,19 +264,19 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             buy_quality = 1 + ((lower_band - price) / lower_band)
 
             # Determine the number of shares to buy dynamically based on Buy Quality
-            shares_to_buy = min(max_shares_per_trade, buy_quality * (cash // price))
+            shares_to_buy = int(min(max_shares_per_trade, buy_quality * (cash // price)))  # Ensure integer shares
 
             # Check buy/sell decision before updating bands with the new minute's price
             if price <= lower_band and cash >= price:
-                # Buy logic: Buy more shares if buy_quality is higher
-                shares += shares_to_buy
-                cash_spent = shares_to_buy * price
-                cash -= cash_spent
+                if shares_to_buy > 0:  # Only proceed if shares to buy is greater than 0
+                    shares += shares_to_buy
+                    cash_spent = shares_to_buy * price
+                    cash -= cash_spent
 
-                # Track the purchase in history
-                purchase_history.append((price, shares_to_buy))
+                    # Track the purchase in history
+                    purchase_history.append((price, shares_to_buy))
 
-                total_trades += 1  # Increment trade count for buy
+                    total_trades += 1  # Increment trade count for buy
 
             elif price >= upper_band and shares > 0:
                 # Sell logic: Sell all held shares
@@ -310,8 +305,15 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             historical_prices.append(price)  # Include this minute's price in historical prices
             lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)  # Recalculate with new price
 
+        # Calculate the success percentage for the day
+        total_sells_value = winning_sells + abs(losing_sells)
+        if total_sells_value > 0:
+            daily_success_percent = (winning_sells - abs(losing_sells)) / total_sells_value * 100
+        else:
+            daily_success_percent = 0
+
         # Write a single summary entry for the day in `trades.db`
-        write_daily_summary_to_db(trades_file, current_date, daily_profit, winning_sells, losing_sells)
+        write_daily_summary_to_db(trades_file, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent)
 
         # Write end-of-day equity data
         ending_price = stock_data[-1][0]
@@ -323,6 +325,15 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
         current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
     print(f"Total Trades Executed: {total_trades}")
+
+    # Calculate the average daily success percentage from `trades.db`
+    conn = sqlite3.connect(trades_file)
+    c = conn.cursor()
+    c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades")
+    avg_success_percentage = c.fetchone()[0]
+    conn.close()
+
+    print(f"Average Daily Success Percentage: {avg_success_percentage:.2f}%")
 
     total_equity = cash + (shares * ending_price)
     total_returns = ((total_equity - initial_cash) / initial_cash) * 100
