@@ -239,6 +239,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
     # Variables to track daily and cumulative performance
     winning_sells = 0  # Track total value of profitable sells for the day
     losing_sells = 0  # Track total value of unprofitable sells for the day
+    max_shares_per_trade = 10  # Set a cap for max shares to buy in one trade to avoid over-leveraging
 
     while current_date <= simulate_end_date:
         current_date_dt = datetime.strptime(current_date, '%Y-%m-%d')
@@ -264,10 +265,15 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
 
         # Track purchase details for profit calculation
         for price, volume, date, time_ in stock_data:
+            # Calculate Buy Quality based on how far the price is from the lower band
+            buy_quality = 1 + ((lower_band - price) / lower_band)
+
+            # Determine the number of shares to buy dynamically based on Buy Quality
+            shares_to_buy = min(max_shares_per_trade, buy_quality * (cash // price))
+
             # Check buy/sell decision before updating bands with the new minute's price
             if price <= lower_band and cash >= price:
-                # Buy logic
-                shares_to_buy = 1  # Buy only 1 share at a time
+                # Buy logic: Buy more shares if buy_quality is higher
                 shares += shares_to_buy
                 cash_spent = shares_to_buy * price
                 cash -= cash_spent
@@ -278,7 +284,7 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
                 total_trades += 1  # Increment trade count for buy
 
             elif price >= upper_band and shares > 0:
-                # Sell logic
+                # Sell logic: Sell all held shares
                 cash_gained = shares * price
 
                 # Calculate profit based on cumulative purchase history
