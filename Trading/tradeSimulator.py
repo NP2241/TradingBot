@@ -44,42 +44,6 @@ def is_market_closed(date):
 
     return False
 
-def initialize_equity_file(equity_file):
-    """
-    Initializes the equity file with columns: date, cash, and equity.
-    """
-    os.makedirs(os.path.dirname(equity_file), exist_ok=True)
-
-    conn = sqlite3.connect(equity_file)
-    c = conn.cursor()
-
-    # Create the new table structure without 'shares' column
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS equity (
-            date TEXT,
-            cash REAL,
-            equity REAL
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
-def write_equity_to_db(equity_file, current_date, cash, equity):
-    """
-    Writes the equity data for each day into the equity database.
-    Excludes the 'shares' column.
-    """
-    conn = sqlite3.connect(equity_file)
-    c = conn.cursor()
-
-    # Remove shares from insertion statement
-    c.execute("INSERT INTO equity (date, cash, equity) VALUES (?, ?, ?)",
-              (current_date, cash, equity))
-
-    conn.commit()
-    conn.close()
-
 
 def write_trade_to_db(trades_file, symbol, date, action, shares, price, profit):
     """
@@ -173,20 +137,52 @@ def get_historical_prices(db_path, start_date, simulate_start_date):
     conn.close()
     return historical_prices
 
+def initialize_equity_file(equity_file):
+    """
+    Initializes the equity file with columns: date, cash, equity, buys, and sells.
+    """
+    os.makedirs(os.path.dirname(equity_file), exist_ok=True)
+
+    conn = sqlite3.connect(equity_file)
+    c = conn.cursor()
+
+    # Create the new table structure with 'buys' and 'sells' columns
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS equity (
+            date TEXT,
+            cash REAL,
+            equity REAL,
+            buys INTEGER,
+            sells INTEGER
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+def write_equity_to_db(equity_file, current_date, cash, equity, daily_buys, daily_sells):
+    """
+    Writes the equity data for each day into the equity database.
+    Includes 'buys' and 'sells' columns.
+    """
+    conn = sqlite3.connect(equity_file)
+    c = conn.cursor()
+
+    # Insert the data into the equity table, including 'buys' and 'sells'
+    c.execute("INSERT INTO equity (date, cash, equity, buys, sells) VALUES (?, ?, ?, ?, ?)",
+              (current_date, cash, equity, daily_buys, daily_sells))
+
+    conn.commit()
+    conn.close()
+
 def initialize_trade_summary_file(trades_file, symbol):
     """
-    Initializes the trade summary file for a given stock symbol with columns: date, daily_profit, winning_sells, losing_sells, and daily_success_percent.
-    If the table already exists, it will be dropped and recreated to ensure correct schema.
+    Initialize a trade summary table for each stock symbol in the trades file.
     """
-    os.makedirs(os.path.dirname(trades_file), exist_ok=True)
-
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Drop the existing table if it exists to ensure correct schema
-    c.execute(f"DROP TABLE IF EXISTS {symbol}_trades")
-
-    # Create the new table structure with the correct column names
+    # Create a table for the specific stock symbol
     c.execute(f'''
         CREATE TABLE IF NOT EXISTS {symbol}_trades (
             date TEXT,
@@ -196,24 +192,25 @@ def initialize_trade_summary_file(trades_file, symbol):
             daily_success_percent REAL
         )
     ''')
-
     conn.commit()
     conn.close()
 
 def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_sells, losing_sells, daily_success_percent):
     """
-    Writes the daily summary for trading activity into the trades table.
-    The summary includes date, daily profit, total winning sells, total losing sells, and daily success percent.
+    Write daily summary data into the trades file for each stock symbol.
     """
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Insert the new columns for date, daily_profit, winning_sells, losing_sells, and daily success percentage
-    c.execute(f"INSERT INTO {symbol}_trades (date, daily_profit, winning_sells, losing_sells, daily_success_percent) VALUES (?, ?, ?, ?, ?)",
-              (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
+    # Insert daily summary for the stock
+    c.execute(f'''
+        INSERT INTO {symbol}_trades (date, daily_profit, winning_sells, losing_sells, daily_success_percent)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
 
     conn.commit()
     conn.close()
+    print(f"Written daily summary for {symbol} on {date} into trades.db")  # Debug print statement
 
 def simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Initialize shared cash pool and starting equity
@@ -278,81 +275,106 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         # Reset daily profit and performance for each symbol at the start of the day
         for symbol in symbols:
             stock_data[symbol]['daily_profit'] = 0
-            stock_data[symbol]['winning_sells'] = 0
-            stock_data[symbol]['losing_sells'] = 0
+            stock_data[symbol]['winning_sells'] = 0  # Reset winning sells count for the day
+            stock_data[symbol]['losing_sells'] = 0  # Reset losing sells count for the day
+
+        # Track total buys and sells across all symbols for the day
+        daily_buys = 0
+        daily_sells = 0
 
         # Fetch data for each symbol
         stock_prices_per_minute = {}
         for symbol in symbols:
-            simulate_cursor[symbol].execute("SELECT stock_price, volume, price_date, price_time FROM stock_prices WHERE price_date = ? ORDER BY price_time",
-                                            (current_date,))
+            simulate_cursor[symbol].execute(
+                "SELECT stock_price, volume, price_date, price_time FROM stock_prices WHERE price_date = ? ORDER BY price_time",
+                (current_date,))
             stock_data_for_symbol = simulate_cursor[symbol].fetchall()
             if not stock_data_for_symbol:
                 continue
             stock_prices_per_minute[symbol] = stock_data_for_symbol
 
-        # **Step 1**: Sell phase - Evaluate sell opportunities for all stocks first
+        # Store available cash at the beginning of the minute to avoid using cash from current-minute sells
+        cash_at_minute_start = total_cash
+
+        # Track the best buy opportunity within the current minute
+        best_buy_symbol = None
+        best_buy_price = float('inf')
+
+        # Evaluate buy and sell opportunities for each stock in the same loop
         for symbol, stock_info in stock_prices_per_minute.items():
             for price, volume, date, time_ in stock_info:
-                lower_band, _, upper_band = initial_bands[symbol]
+                lower_band, weighted_moving_average, upper_band = initial_bands[symbol]
 
                 # Calculate dynamic profit/loss tolerance based on cash levels
                 min_loss_tolerance = -3 / 100  # 3% loss tolerance
                 min_profit_margin = 0.05 / 100  # 0.05% minimum profit margin
-                cash_ratio = total_cash / initial_cash  # Calculate the ratio of current cash to initial cash
 
-                # Dynamic tolerance based on cash levels: Higher tolerance for losses as cash depletes
-                dynamic_loss_tolerance = min_loss_tolerance * (1 - cash_ratio)  # Allow larger losses as cash goes down
-                dynamic_profit_margin = min_profit_margin + (1 - cash_ratio) * min_profit_margin  # Lower profit requirements when cash is low
-
-                # Sell decision: when the price is above or equal to the upper band or if we are cash-strapped
-                if (price >= upper_band or cash_ratio < 0.2) and stock_data[symbol]['shares'] > 0:
+                # --- SELL LOGIC ---
+                # Sell decision: when the price is above or equal to the upper band
+                if price >= upper_band and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
-                    cash_gained = shares_to_sell * price
-                    total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
+                    if shares_to_sell > 0:
+                        # Calculate total sell value
+                        cash_gained = shares_to_sell * price
 
-                    # Calculate the realized profit or loss based on the initial purchase history
-                    profit_or_loss = cash_gained - total_buy_cost
+                        # Calculate total buy cost based on purchase history
+                        total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
 
-                    # Check if the sell is either profitable or meets the loss tolerance requirement
-                    if profit_or_loss >= total_buy_cost * dynamic_profit_margin or profit_or_loss >= total_buy_cost * dynamic_loss_tolerance:
-                        total_cash += cash_gained
-                        stock_data[symbol]['shares'] = 0
-                        stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
-                        stock_data[symbol]['daily_profit'] += profit_or_loss
+                        # Calculate the realized profit or loss based on the initial purchase history
+                        profit_or_loss = cash_gained - total_buy_cost
 
-                        # Update winning/losing sells based on profit or loss
-                        if profit_or_loss > 0:
-                            stock_data[symbol]['winning_sells'] += profit_or_loss
-                        else:
-                            stock_data[symbol]['losing_sells'] += profit_or_loss
+                        # Check if the sell is either profitable or meets the loss tolerance requirement
+                        if profit_or_loss >= total_buy_cost * min_profit_margin or profit_or_loss >= total_buy_cost * min_loss_tolerance:
+                            # Update total cash
+                            total_cash += cash_gained
 
-                        trade_data[symbol]['total_trades'] += 1
+                            # Determine if this is a winning or losing sell
+                            if profit_or_loss > 0:
+                                stock_data[symbol]['winning_sells'] += profit_or_loss  # Update with actual profit value
+                            else:
+                                stock_data[symbol]['losing_sells'] += abs(profit_or_loss)  # Update with actual loss value
+
+                            # Reset shares and purchase history after selling
+                            stock_data[symbol]['shares'] = 0
+                            stock_data[symbol]['purchase_history'] = []
+
+                            # Update daily profit
+                            stock_data[symbol]['daily_profit'] += profit_or_loss
+
+                            # Increment daily sells
+                            daily_sells += shares_to_sell
+
+                            # Record the total trades executed for the stock
+                            trade_data[symbol]['total_trades'] += 1
+
+
+                # --- BUY LOGIC ---
+                # Identify the best buy opportunity for the current minute
+                if price <= lower_band and cash_at_minute_start >= price:
+                    # Track the best buy based on the lowest price
+                    if price < best_buy_price:
+                        best_buy_symbol = symbol
+                        best_buy_price = price
 
                 # Update bands for the next minute using the new price
                 historical_prices.append(price)
                 lower_band, _, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)
                 initial_bands[symbol] = (lower_band, _, upper_band)
 
-        # **Step 2**: Buy phase - Evaluate buy opportunities only after all sells are done
-        for symbol, stock_info in stock_prices_per_minute.items():
-            for price, volume, date, time_ in stock_info:
-                lower_band, _, upper_band = initial_bands[symbol]
+        # Execute the best buy for the minute (only if there is a best buy)
+        if best_buy_symbol is not None and best_buy_price <= cash_at_minute_start:
+            shares_to_buy = int(cash_at_minute_start // best_buy_price)
+            if shares_to_buy > 0:
+                stock_data[best_buy_symbol]['shares'] += shares_to_buy
+                cash_spent = shares_to_buy * best_buy_price
+                total_cash -= cash_spent
+                stock_data[best_buy_symbol]['purchase_history'].append((best_buy_price, shares_to_buy))
 
-                # Buy decision: when the price is below or equal to the lower band and we have enough cash available
-                if price <= lower_band and total_cash >= price:
-                    shares_to_buy = int(total_cash // price)
-                    if shares_to_buy > 0:
-                        stock_data[symbol]['shares'] += shares_to_buy
-                        cash_spent = shares_to_buy * price
-                        total_cash -= cash_spent
-                        stock_data[symbol]['purchase_history'].append((price, shares_to_buy))
-                        trade_data[symbol]['total_trades'] += 1
+                # Increment daily buys
+                daily_buys += shares_to_buy
 
-                # Update bands for the next minute using the new price
-                historical_prices.append(price)
-                lower_band, _, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)
-                initial_bands[symbol] = (lower_band, _, upper_band)
+                # Record the total trades executed for the stock
+                trade_data[best_buy_symbol]['total_trades'] += 1
 
         # Calculate combined end-of-day equity for all stocks
         combined_equity = total_cash
@@ -362,24 +384,28 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 if closing_price:
                     combined_equity += stock_data[symbol]['shares'] * closing_price
 
-        # Write end-of-day summary entry for each symbol
+        # Write daily summary for each stock into `trades.db`
         for symbol in symbols:
             daily_profit = stock_data[symbol]['daily_profit']
-            winning_sells = stock_data[symbol]['winning_sells']
-            losing_sells = stock_data[symbol]['losing_sells']
+            winning_sells = stock_data[symbol]['winning_sells']  # Winning sells for this stock on this day
+            losing_sells = stock_data[symbol]['losing_sells']    # Losing sells for this stock on this day
 
-            total_sells_value = winning_sells + abs(losing_sells)
-            daily_success_percent = (winning_sells - abs(losing_sells)) / total_sells_value * 100 if total_sells_value > 0 else 0
+            # Calculate the daily success percentage using only today's data
+            total_sells_value = winning_sells + losing_sells
+            daily_success_percent = (winning_sells - losing_sells) / total_sells_value * 100 if total_sells_value > 0 else 0
 
+            # Write the daily summary into the trades database for this specific stock
             write_daily_summary_to_db(trades_file, symbol, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent)
 
-        # Write combined equity into `equity.db` at the end of the day
-        write_equity_to_db(equity_file, current_date, total_cash, combined_equity)
+        # Write combined equity into `equity.db` at the end of the day, including daily buys and sells
+        write_equity_to_db(equity_file, current_date, total_cash, combined_equity, daily_buys, daily_sells)
 
+        # Move to the next day
         current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
     # Final report
-    print(f"Total Trades Executed: {sum(trade_data[symbol]['total_trades'] for symbol in symbols)}")
+    total_trades_executed = sum(trade_data[symbol]['total_trades'] for symbol in symbols)
+    print(f"Total Trades Executed: {total_trades_executed}")
 
     # Display average daily success percentage and total profit for each symbol
     conn = sqlite3.connect(trades_file)
