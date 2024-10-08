@@ -216,10 +216,14 @@ def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_s
     conn.close()
 
 def simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
-    # Initialize tracking variables
+    # Initialize shared cash pool and starting equity
     total_cash = initial_cash  # Shared cash across all stocks
-    stock_data = {symbol: {'shares': 0, 'purchase_history': []} for symbol in symbols}
-    trade_data = {symbol: {'total_trades': 0, 'daily_profit': 0, 'winning_sells': 0, 'losing_sells': 0} for symbol in symbols}
+    starting_equity = initial_cash
+    combined_equity = initial_cash
+
+    # Initialize tracking variables for each stock
+    stock_data = {symbol: {'shares': 0, 'purchase_history': [], 'daily_profit': 0, 'winning_sells': 0, 'losing_sells': 0} for symbol in symbols}
+    trade_data = {symbol: {'total_trades': 0} for symbol in symbols}
 
     # Create tables for each stock in trades.db and initialize the equity file
     trades_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
@@ -227,6 +231,7 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
     clear_trade_data_file(trades_file)
     clear_trade_data_file(equity_file)
 
+    # Initialize trade summary tables for each stock and the equity file
     for symbol in symbols:
         initialize_trade_summary_file(trades_file, symbol)
     initialize_equity_file(equity_file)
@@ -258,7 +263,7 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices, window=14)
         initial_bands[symbol] = (lower_band, weighted_moving_average, upper_band)
 
-    # Step 2: Simulate trading for each minute using minute-by-minute data from the current day onwards for all symbols
+    # Simulate trading for each minute using minute-by-minute data from the current day onwards for all symbols
     simulate_db_conn = {symbol: sqlite3.connect(get_db_path(symbol, start_date, simulate_end_date, interval)) for symbol in symbols}
     simulate_cursor = {symbol: simulate_db_conn[symbol].cursor() for symbol in symbols}
 
@@ -270,6 +275,12 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
             current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
             continue
 
+        # Reset daily profit and performance for each symbol at the start of the day
+        for symbol in symbols:
+            stock_data[symbol]['daily_profit'] = 0
+            stock_data[symbol]['winning_sells'] = 0
+            stock_data[symbol]['losing_sells'] = 0
+
         # Fetch data for each symbol
         stock_prices_per_minute = {}
         for symbol in symbols:
@@ -280,75 +291,61 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 continue
             stock_prices_per_minute[symbol] = stock_data_for_symbol
 
-        # Determine the best stock to buy for the current minute based on buy quality
-        best_stock = None
-        best_buy_quality = 0
+        # Execute buy/sell decisions for each stock independently
         for symbol, stock_info in stock_prices_per_minute.items():
-            price = stock_info[0][0]  # Get the current minute price for the symbol
-            lower_band, _, upper_band = initial_bands[symbol]
-
-            # Determine buy quality based on how far the price is from the lower band
-            buy_quality = 1 + ((lower_band - price) / lower_band)
-            if buy_quality > best_buy_quality:
-                best_buy_quality = buy_quality
-                best_stock = symbol
-
-        # Execute buy/sell decisions for the selected stock
-        if best_stock:
-            for price, volume, date, time_ in stock_prices_per_minute[best_stock]:
-                lower_band, _, upper_band = initial_bands[best_stock]
+            for price, volume, date, time_ in stock_info:
+                lower_band, _, upper_band = initial_bands[symbol]
 
                 # Buy decision: when the price is below or equal to the lower band and we have cash
                 if price <= lower_band and total_cash >= price:
                     shares_to_buy = int(total_cash // price)
                     if shares_to_buy > 0:
-                        # Update cash and shares for the selected stock
-                        stock_data[best_stock]['shares'] += shares_to_buy
+                        stock_data[symbol]['shares'] += shares_to_buy
                         cash_spent = shares_to_buy * price
                         total_cash -= cash_spent
-                        stock_data[best_stock]['purchase_history'].append((price, shares_to_buy))
-                        trade_data[best_stock]['total_trades'] += 1
-                        print(f"Bought {shares_to_buy} shares of {best_stock} at {price}, cash remaining: {total_cash}")
+                        stock_data[symbol]['purchase_history'].append((price, shares_to_buy))
+                        trade_data[symbol]['total_trades'] += 1
 
                 # Sell decision: when the price is above or equal to the upper band and we have shares to sell
-                elif price >= upper_band and stock_data[best_stock]['shares'] > 0:
-                    shares_to_sell = stock_data[best_stock]['shares']
+                elif price >= upper_band and stock_data[symbol]['shares'] > 0:
+                    shares_to_sell = stock_data[symbol]['shares']
                     cash_gained = shares_to_sell * price
-                    profit = cash_gained - sum([p * q for p, q in stock_data[best_stock]['purchase_history']])  # Calculate profit based on purchase history
+                    total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
+
+                    # Calculate the realized profit based on the initial purchase history
+                    profit = cash_gained - total_buy_cost
 
                     total_cash += cash_gained
-                    stock_data[best_stock]['shares'] = 0
-                    stock_data[best_stock]['purchase_history'] = []  # Reset purchase history after selling
-                    trade_data[best_stock]['daily_profit'] += profit
+                    stock_data[symbol]['shares'] = 0
+                    stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
+                    stock_data[symbol]['daily_profit'] += profit
 
                     # Update winning/losing sells based on profit
                     if profit > 0:
-                        trade_data[best_stock]['winning_sells'] += profit
+                        stock_data[symbol]['winning_sells'] += profit
                     else:
-                        trade_data[best_stock]['losing_sells'] += profit
+                        stock_data[symbol]['losing_sells'] += profit
 
-                    trade_data[best_stock]['total_trades'] += 1
-                    print(f"Sold {shares_to_sell} shares of {best_stock} at {price}, cash after sell: {total_cash}")
+                    trade_data[symbol]['total_trades'] += 1
 
                 # Update bands for the next minute using the new price
                 historical_prices.append(price)
                 lower_band, _, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)
-                initial_bands[best_stock] = (lower_band, _, upper_band)
+                initial_bands[symbol] = (lower_band, _, upper_band)
 
         # Calculate combined end-of-day equity for all stocks
         combined_equity = total_cash
         for symbol in symbols:
             if stock_data[symbol]['shares'] > 0:
-                # Get the closing price for this stock on the current day
                 closing_price = stock_prices_per_minute.get(symbol, [(None, None, None, None)])[-1][0]
                 if closing_price:
                     combined_equity += stock_data[symbol]['shares'] * closing_price
 
         # Write end-of-day summary entry for each symbol
         for symbol in symbols:
-            daily_profit = trade_data[symbol]['daily_profit']
-            winning_sells = trade_data[symbol]['winning_sells']
-            losing_sells = trade_data[symbol]['losing_sells']
+            daily_profit = stock_data[symbol]['daily_profit']
+            winning_sells = stock_data[symbol]['winning_sells']
+            losing_sells = stock_data[symbol]['losing_sells']
 
             total_sells_value = winning_sells + abs(losing_sells)
             daily_success_percent = (winning_sells - abs(losing_sells)) / total_sells_value * 100 if total_sells_value > 0 else 0
@@ -363,13 +360,29 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
     # Final report
     print(f"Total Trades Executed: {sum(trade_data[symbol]['total_trades'] for symbol in symbols)}")
 
-    # Display average daily success percentage for each symbol
+    # Display average daily success percentage and total profit for each symbol
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
+    overall_success_percentages = []
+    overall_profit = 0
     for symbol in symbols:
         c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades")
-        avg_success_percentage = c.fetchone()[0]
-        print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:.2f}%")
+        avg_success_percentage = c.fetchone()[0] or 0.0
+        overall_success_percentages.append(avg_success_percentage)
+
+        # Calculate total profit for each symbol
+        c.execute(f"SELECT SUM(daily_profit) FROM {symbol}_trades")
+        total_profit = c.fetchone()[0] or 0.0
+        overall_profit += total_profit
+        print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:.2f}%, Total Profit: {total_profit:.2f}")
+
+    # Calculate and display overall results
+    overall_avg_success_percentage = sum(overall_success_percentages) / len(overall_success_percentages)
+    print(f"Overall Average Daily Success Percentage: {overall_avg_success_percentage:.2f}%")
+    print(f"Overall Starting Equity: {starting_equity}")
+    print(f"Overall Final Equity: {combined_equity:.2f}")
+    print(f"Overall Percentage Returns: {((combined_equity - starting_equity) / starting_equity) * 100:.2f}%")
+    print(f"Overall Total Profit: {combined_equity - starting_equity:.2f}")
     conn.close()
 
 # Parsing and handling multiple symbols correctly
