@@ -296,6 +296,18 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
             for price, volume, date, time_ in stock_info:
                 lower_band, _, upper_band = initial_bands[symbol]
 
+                # Calculate dynamic profit margin based on cash levels
+                min_profit_margin = 0.1 / 100  # 0.1% minimum profit margin
+                max_profit_margin = 2 / 100  # 2% maximum profit margin
+                cash_ratio = total_cash / initial_cash  # Calculate the ratio of current cash to initial cash
+
+                # Calculate the dynamic profit threshold
+                dynamic_profit_margin = min_profit_margin + (max_profit_margin - min_profit_margin) * cash_ratio
+                if dynamic_profit_margin < min_profit_margin:
+                    dynamic_profit_margin = min_profit_margin
+                elif dynamic_profit_margin > max_profit_margin:
+                    dynamic_profit_margin = max_profit_margin
+
                 # Sell decision: when the price is above or equal to the upper band and we have shares to sell
                 if price >= upper_band and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
@@ -305,18 +317,20 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                     # Calculate the realized profit based on the initial purchase history
                     profit = cash_gained - total_buy_cost
 
-                    total_cash += cash_gained
-                    stock_data[symbol]['shares'] = 0
-                    stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
-                    stock_data[symbol]['daily_profit'] += profit
+                    # Only sell if the profit exceeds the dynamically calculated profit margin
+                    if profit >= total_buy_cost * dynamic_profit_margin:
+                        total_cash += cash_gained
+                        stock_data[symbol]['shares'] = 0
+                        stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
+                        stock_data[symbol]['daily_profit'] += profit
 
-                    # Update winning/losing sells based on profit
-                    if profit > 0:
-                        stock_data[symbol]['winning_sells'] += profit
-                    else:
-                        stock_data[symbol]['losing_sells'] += profit
+                        # Update winning/losing sells based on profit
+                        if profit > 0:
+                            stock_data[symbol]['winning_sells'] += profit
+                        else:
+                            stock_data[symbol]['losing_sells'] += profit
 
-                    trade_data[symbol]['total_trades'] += 1
+                        trade_data[symbol]['total_trades'] += 1
 
                 # Update bands for the next minute using the new price
                 historical_prices.append(price)
