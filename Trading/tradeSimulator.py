@@ -291,23 +291,13 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 continue
             stock_prices_per_minute[symbol] = stock_data_for_symbol
 
-        # Execute buy/sell decisions for each stock independently
+        # **Step 1**: Sell phase - Evaluate sell opportunities for all stocks first
         for symbol, stock_info in stock_prices_per_minute.items():
             for price, volume, date, time_ in stock_info:
                 lower_band, _, upper_band = initial_bands[symbol]
 
-                # Buy decision: when the price is below or equal to the lower band and we have cash
-                if price <= lower_band and total_cash >= price:
-                    shares_to_buy = int(total_cash // price)
-                    if shares_to_buy > 0:
-                        stock_data[symbol]['shares'] += shares_to_buy
-                        cash_spent = shares_to_buy * price
-                        total_cash -= cash_spent
-                        stock_data[symbol]['purchase_history'].append((price, shares_to_buy))
-                        trade_data[symbol]['total_trades'] += 1
-
                 # Sell decision: when the price is above or equal to the upper band and we have shares to sell
-                elif price >= upper_band and stock_data[symbol]['shares'] > 0:
+                if price >= upper_band and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
                     cash_gained = shares_to_sell * price
                     total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
@@ -327,6 +317,26 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                         stock_data[symbol]['losing_sells'] += profit
 
                     trade_data[symbol]['total_trades'] += 1
+
+                # Update bands for the next minute using the new price
+                historical_prices.append(price)
+                lower_band, _, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)
+                initial_bands[symbol] = (lower_band, _, upper_band)
+
+        # **Step 2**: Buy phase - Evaluate buy opportunities only after all sells are done
+        for symbol, stock_info in stock_prices_per_minute.items():
+            for price, volume, date, time_ in stock_info:
+                lower_band, _, upper_band = initial_bands[symbol]
+
+                # Buy decision: when the price is below or equal to the lower band and we have enough cash available
+                if price <= lower_band and total_cash >= price:
+                    shares_to_buy = int(total_cash // price)
+                    if shares_to_buy > 0:
+                        stock_data[symbol]['shares'] += shares_to_buy
+                        cash_spent = shares_to_buy * price
+                        total_cash -= cash_spent
+                        stock_data[symbol]['purchase_history'].append((price, shares_to_buy))
+                        trade_data[symbol]['total_trades'] += 1
 
                 # Update bands for the next minute using the new price
                 historical_prices.append(price)
