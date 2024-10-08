@@ -210,7 +210,6 @@ def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_s
 
     conn.commit()
     conn.close()
-    print(f"Written daily summary for {symbol} on {date} into trades.db")  # Debug print statement
 
 def simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Initialize shared cash pool and starting equity
@@ -405,7 +404,7 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
 
     # Final report
     total_trades_executed = sum(trade_data[symbol]['total_trades'] for symbol in symbols)
-    print(f"Total Trades Executed: {total_trades_executed}")
+    print(f"Total Trades Executed: {total_trades_executed:,}")  # Added comma separator for total trades
 
     # Display average daily success percentage and total profit for each symbol
     conn = sqlite3.connect(trades_file)
@@ -421,16 +420,24 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         c.execute(f"SELECT SUM(daily_profit) FROM {symbol}_trades WHERE daily_profit != 0 OR winning_sells != 0 OR losing_sells != 0")
         total_profit = c.fetchone()[0] or 0.0
         overall_profit += total_profit
-        print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:.2f}%, Total Profit: {total_profit:.2f}")
+
+        # Use commas as thousands separators in the print statement for profit and percentage
+        print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:,.2f}%, Total Profit: {total_profit:,.2f}")
 
     # Calculate and display overall results
     overall_avg_success_percentage = sum(overall_success_percentages) / len(overall_success_percentages)
-    print(f"Overall Average Daily Success Percentage: {overall_avg_success_percentage:.2f}%")
-    print(f"Overall Starting Equity: {starting_equity}")
-    print(f"Overall Final Equity: {combined_equity:.2f}")
-    print(f"Overall Percentage Returns: {((combined_equity - starting_equity) / starting_equity) * 100:.2f}%")
-    print(f"Overall Total Profit: {combined_equity - starting_equity:.2f}")
+    print(f"Overall Average Daily Success Percentage: {overall_avg_success_percentage:,.2f}%")
+    print(f"Overall Starting Equity: {starting_equity:,.2f}")
+    print(f"Overall Final Equity: {combined_equity:,.2f}")
+
+    # Use commas for percentage returns
+    overall_percentage_returns = ((combined_equity - starting_equity) / starting_equity) * 100
+    print(f"Overall Percentage Returns: {overall_percentage_returns:,.2f}%")  # Use commas in percentage
+
+    print(f"Overall Total Profit: {combined_equity - starting_equity:,.2f}")
     conn.close()
+
+
 
 # Parsing and handling multiple symbols correctly
 if len(sys.argv) != 10:
