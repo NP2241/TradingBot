@@ -296,39 +296,36 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
             for price, volume, date, time_ in stock_info:
                 lower_band, _, upper_band = initial_bands[symbol]
 
-                # Calculate dynamic profit margin based on cash levels
-                min_profit_margin = 0.1 / 100  # 0.1% minimum profit margin
-                max_profit_margin = 2 / 100  # 2% maximum profit margin
+                # Calculate dynamic profit/loss tolerance based on cash levels
+                min_loss_tolerance = -3 / 100  # 3% loss tolerance
+                min_profit_margin = 0.05 / 100  # 0.05% minimum profit margin
                 cash_ratio = total_cash / initial_cash  # Calculate the ratio of current cash to initial cash
 
-                # Calculate the dynamic profit threshold
-                dynamic_profit_margin = min_profit_margin + (max_profit_margin - min_profit_margin) * cash_ratio
-                if dynamic_profit_margin < min_profit_margin:
-                    dynamic_profit_margin = min_profit_margin
-                elif dynamic_profit_margin > max_profit_margin:
-                    dynamic_profit_margin = max_profit_margin
+                # Dynamic tolerance based on cash levels: Higher tolerance for losses as cash depletes
+                dynamic_loss_tolerance = min_loss_tolerance * (1 - cash_ratio)  # Allow larger losses as cash goes down
+                dynamic_profit_margin = min_profit_margin + (1 - cash_ratio) * min_profit_margin  # Lower profit requirements when cash is low
 
-                # Sell decision: when the price is above or equal to the upper band and we have shares to sell
-                if price >= upper_band and stock_data[symbol]['shares'] > 0:
+                # Sell decision: when the price is above or equal to the upper band or if we are cash-strapped
+                if (price >= upper_band or cash_ratio < 0.2) and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
                     cash_gained = shares_to_sell * price
                     total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
 
-                    # Calculate the realized profit based on the initial purchase history
-                    profit = cash_gained - total_buy_cost
+                    # Calculate the realized profit or loss based on the initial purchase history
+                    profit_or_loss = cash_gained - total_buy_cost
 
-                    # Only sell if the profit exceeds the dynamically calculated profit margin
-                    if profit >= total_buy_cost * dynamic_profit_margin:
+                    # Check if the sell is either profitable or meets the loss tolerance requirement
+                    if profit_or_loss >= total_buy_cost * dynamic_profit_margin or profit_or_loss >= total_buy_cost * dynamic_loss_tolerance:
                         total_cash += cash_gained
                         stock_data[symbol]['shares'] = 0
                         stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
-                        stock_data[symbol]['daily_profit'] += profit
+                        stock_data[symbol]['daily_profit'] += profit_or_loss
 
-                        # Update winning/losing sells based on profit
-                        if profit > 0:
-                            stock_data[symbol]['winning_sells'] += profit
+                        # Update winning/losing sells based on profit or loss
+                        if profit_or_loss > 0:
+                            stock_data[symbol]['winning_sells'] += profit_or_loss
                         else:
-                            stock_data[symbol]['losing_sells'] += profit
+                            stock_data[symbol]['losing_sells'] += profit_or_loss
 
                         trade_data[symbol]['total_trades'] += 1
 
@@ -390,12 +387,12 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
     overall_success_percentages = []
     overall_profit = 0
     for symbol in symbols:
-        c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades")
+        c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades WHERE daily_profit != 0 OR winning_sells != 0 OR losing_sells != 0")
         avg_success_percentage = c.fetchone()[0] or 0.0
         overall_success_percentages.append(avg_success_percentage)
 
         # Calculate total profit for each symbol
-        c.execute(f"SELECT SUM(daily_profit) FROM {symbol}_trades")
+        c.execute(f"SELECT SUM(daily_profit) FROM {symbol}_trades WHERE daily_profit != 0 OR winning_sells != 0 OR losing_sells != 0")
         total_profit = c.fetchone()[0] or 0.0
         overall_profit += total_profit
         print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:.2f}%, Total Profit: {total_profit:.2f}")
