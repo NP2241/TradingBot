@@ -178,38 +178,42 @@ def write_equity_to_db(equity_file, current_date, cash, equity, daily_buys, dail
 def initialize_trade_summary_file(trades_file, symbol):
     """
     Initialize a trade summary table for each stock symbol in the trades file.
+    Adds the new columns 'buys' and 'sells' to track daily buys and sells.
     """
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Create a table for the specific stock symbol
+    # Create a table for the specific stock symbol with new 'buys' and 'sells' columns
     c.execute(f'''
         CREATE TABLE IF NOT EXISTS {symbol}_trades (
             date TEXT,
             daily_profit REAL,
             winning_sells REAL,
             losing_sells REAL,
-            daily_success_percent REAL
+            daily_success_percent REAL,
+            buys INTEGER,
+            sells INTEGER
         )
     ''')
     conn.commit()
     conn.close()
 
-def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_sells, losing_sells, daily_success_percent):
+def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_sells, losing_sells, daily_success_percent, daily_buys, daily_sells):
     """
-    Write daily summary data into the trades file for each stock symbol.
+    Write daily summary data into the trades file for each stock symbol, including buys and sells.
     """
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Insert daily summary for the stock
+    # Insert daily summary for the stock, including the new buys and sells columns
     c.execute(f'''
-        INSERT INTO {symbol}_trades (date, daily_profit, winning_sells, losing_sells, daily_success_percent)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
+        INSERT INTO {symbol}_trades (date, daily_profit, winning_sells, losing_sells, daily_success_percent, buys, sells)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (date, daily_profit, winning_sells, losing_sells, daily_success_percent, daily_buys, daily_sells))
 
     conn.commit()
     conn.close()
+    print(f"Written daily summary for {symbol} on {date} into trades.db")  # Debug print statement
 
 def simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
     # Initialize shared cash pool and starting equity
@@ -281,6 +285,10 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         daily_buys = 0
         daily_sells = 0
 
+        # Track buys and sells for each individual stock
+        stock_daily_buys = {symbol: 0 for symbol in symbols}
+        stock_daily_sells = {symbol: 0 for symbol in symbols}
+
         # Fetch data for each symbol
         stock_prices_per_minute = {}
         for symbol in symbols:
@@ -313,10 +321,7 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 if price >= upper_band and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
                     if shares_to_sell > 0:
-                        # Calculate total sell value
                         cash_gained = shares_to_sell * price
-
-                        # Calculate total buy cost based on purchase history
                         total_buy_cost = sum([p * q for p, q in stock_data[symbol]['purchase_history']])
 
                         # Calculate the realized profit or loss based on the initial purchase history
@@ -324,28 +329,23 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
 
                         # Check if the sell is either profitable or meets the loss tolerance requirement
                         if profit_or_loss >= total_buy_cost * min_profit_margin or profit_or_loss >= total_buy_cost * min_loss_tolerance:
-                            # Update total cash
                             total_cash += cash_gained
-
-                            # Determine if this is a winning or losing sell
-                            if profit_or_loss > 0:
-                                stock_data[symbol]['winning_sells'] += profit_or_loss  # Update with actual profit value
-                            else:
-                                stock_data[symbol]['losing_sells'] += abs(profit_or_loss)  # Update with actual loss value
-
-                            # Reset shares and purchase history after selling
                             stock_data[symbol]['shares'] = 0
-                            stock_data[symbol]['purchase_history'] = []
-
-                            # Update daily profit
+                            stock_data[symbol]['purchase_history'] = []  # Reset purchase history after selling
                             stock_data[symbol]['daily_profit'] += profit_or_loss
 
-                            # Increment daily sells
+                            # Track cash gained or lost for winning or losing sells
+                            if profit_or_loss > 0:
+                                stock_data[symbol]['winning_sells'] += profit_or_loss
+                            else:
+                                stock_data[symbol]['losing_sells'] += abs(profit_or_loss)
+
+                            # Increment daily sells for both the total and individual stock
                             daily_sells += shares_to_sell
+                            stock_daily_sells[symbol] += shares_to_sell
 
                             # Record the total trades executed for the stock
                             trade_data[symbol]['total_trades'] += 1
-
 
                 # --- BUY LOGIC ---
                 # Identify the best buy opportunity for the current minute
@@ -369,8 +369,9 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 total_cash -= cash_spent
                 stock_data[best_buy_symbol]['purchase_history'].append((best_buy_price, shares_to_buy))
 
-                # Increment daily buys
+                # Increment daily buys for both the total and individual stock
                 daily_buys += shares_to_buy
+                stock_daily_buys[best_buy_symbol] += shares_to_buy
 
                 # Record the total trades executed for the stock
                 trade_data[best_buy_symbol]['total_trades'] += 1
@@ -393,8 +394,8 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
             total_sells_value = winning_sells + losing_sells
             daily_success_percent = (winning_sells - losing_sells) / total_sells_value * 100 if total_sells_value > 0 else 0
 
-            # Write the daily summary into the trades database for this specific stock
-            write_daily_summary_to_db(trades_file, symbol, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent)
+            # Write the daily summary into the trades database for this specific stock, including buys and sells
+            write_daily_summary_to_db(trades_file, symbol, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent, stock_daily_buys[symbol], stock_daily_sells[symbol])
 
         # Write combined equity into `equity.db` at the end of the day, including daily buys and sells
         write_equity_to_db(equity_file, current_date, total_cash, combined_equity, daily_buys, daily_sells)
@@ -404,7 +405,7 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
 
     # Final report
     total_trades_executed = sum(trade_data[symbol]['total_trades'] for symbol in symbols)
-    print(f"Total Trades Executed: {total_trades_executed:,}")  # Added comma separator for total trades
+    print(f"Total Trades Executed: {total_trades_executed:,}")
 
     # Display average daily success percentage and total profit for each symbol
     conn = sqlite3.connect(trades_file)
@@ -420,8 +421,6 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         c.execute(f"SELECT SUM(daily_profit) FROM {symbol}_trades WHERE daily_profit != 0 OR winning_sells != 0 OR losing_sells != 0")
         total_profit = c.fetchone()[0] or 0.0
         overall_profit += total_profit
-
-        # Use commas as thousands separators in the print statement for profit and percentage
         print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:,.2f}%, Total Profit: {total_profit:,.2f}")
 
     # Calculate and display overall results
@@ -429,11 +428,8 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
     print(f"Overall Average Daily Success Percentage: {overall_avg_success_percentage:,.2f}%")
     print(f"Overall Starting Equity: {starting_equity:,.2f}")
     print(f"Overall Final Equity: {combined_equity:,.2f}")
-
-    # Use commas for percentage returns
     overall_percentage_returns = ((combined_equity - starting_equity) / starting_equity) * 100
-    print(f"Overall Percentage Returns: {overall_percentage_returns:,.2f}%")  # Use commas in percentage
-
+    print(f"Overall Percentage Returns: {overall_percentage_returns:,.2f}%")
     print(f"Overall Total Profit: {combined_equity - starting_equity:,.2f}")
     conn.close()
 
