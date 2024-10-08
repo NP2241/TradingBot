@@ -45,16 +45,19 @@ def is_market_closed(date):
     return False
 
 def initialize_equity_file(equity_file):
+    """
+    Initializes the equity file with columns: date, cash, and equity.
+    """
     os.makedirs(os.path.dirname(equity_file), exist_ok=True)
 
     conn = sqlite3.connect(equity_file)
     c = conn.cursor()
 
+    # Create the new table structure without 'shares' column
     c.execute('''
         CREATE TABLE IF NOT EXISTS equity (
             date TEXT,
             cash REAL,
-            shares INTEGER,
             equity REAL
         )
     ''')
@@ -62,39 +65,67 @@ def initialize_equity_file(equity_file):
     conn.commit()
     conn.close()
 
-def write_equity_to_db(equity_file, current_date, cash, shares, equity):
+def write_equity_to_db(equity_file, current_date, cash, equity):
+    """
+    Writes the equity data for each day into the equity database.
+    Excludes the 'shares' column.
+    """
     conn = sqlite3.connect(equity_file)
     c = conn.cursor()
 
-    c.execute("INSERT INTO equity (date, cash, shares, equity) VALUES (?, ?, ?, ?)",
-              (current_date, cash, shares, equity))
+    # Remove shares from insertion statement
+    c.execute("INSERT INTO equity (date, cash, equity) VALUES (?, ?, ?)",
+              (current_date, cash, equity))
 
     conn.commit()
     conn.close()
 
-def write_trade_to_db(trades_file, date, action, shares, price, profit):
+
+def write_trade_to_db(trades_file, symbol, date, action, shares, price, profit):
+    """
+    Writes a trade entry into the database.
+    :param trades_file: Path to the trades database file.
+    :param symbol: The stock symbol for which the trade is being recorded.
+    :param date: The date of the trade.
+    :param action: Either 'BUY' or 'SELL'.
+    :param shares: Number of shares traded.
+    :param price: Price at which the trade was executed.
+    :param profit: The profit for a sell action or 0 for a buy action.
+    """
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
+    # Ensure the table is created if not exists
+    c.execute(f'''
+        CREATE TABLE IF NOT EXISTS {symbol}_trades (
+            date TEXT,
+            action TEXT,
+            shares INTEGER,
+            price REAL,
+            profit REAL
+        )
+    ''')
+
+    # Insert the trade details into the table
     c.execute(f"INSERT INTO {symbol}_trades (date, action, shares, price, profit) VALUES (?, ?, ?, ?, ?)",
               (date, action, shares, price, profit))
 
     conn.commit()
     conn.close()
 
+
 def get_last_trade_data(equity_file):
     conn = sqlite3.connect(equity_file)
     c = conn.cursor()
 
-    c.execute("SELECT date, cash, shares, equity FROM equity ORDER BY date DESC LIMIT 1")
+    c.execute("SELECT date, cash, equity FROM equity ORDER BY date DESC LIMIT 1")
     last_trade = c.fetchone()
     conn.close()
 
     if last_trade:
-        return last_trade[1], last_trade[2], last_trade[3]  # cash, shares, equity
+        return last_trade[1], last_trade[2]  # cash, equity
     else:
         return None  # If no data is present
-
 
 
 # Function to calculate weighted average for given prices and weights
@@ -128,21 +159,38 @@ def calculate_weighted_bollinger_bands(prices, window=14):
 
     return lower_band, weighted_moving_average, upper_band
 
-
-def initialize_trade_summary_file(trades_file):
+def get_historical_prices(db_path, start_date, simulate_start_date):
     """
-    Initializes the trade summary file with columns: date, profit, winning_sells, losing_sells, and daily_success_percent.
+    Retrieves historical prices from the database between the start_date and simulate_start_date.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT stock_price FROM stock_prices WHERE price_date BETWEEN ? AND ? ORDER BY price_date, price_time",
+        (start_date, simulate_start_date),
+    )
+    historical_prices = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return historical_prices
+
+def initialize_trade_summary_file(trades_file, symbol):
+    """
+    Initializes the trade summary file for a given stock symbol with columns: date, daily_profit, winning_sells, losing_sells, and daily_success_percent.
+    If the table already exists, it will be dropped and recreated to ensure correct schema.
     """
     os.makedirs(os.path.dirname(trades_file), exist_ok=True)
 
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
+    # Drop the existing table if it exists to ensure correct schema
+    c.execute(f"DROP TABLE IF EXISTS {symbol}_trades")
+
     # Create the new table structure with the correct column names
     c.execute(f'''
         CREATE TABLE IF NOT EXISTS {symbol}_trades (
             date TEXT,
-            profit REAL,
+            daily_profit REAL,
             winning_sells REAL,
             losing_sells REAL,
             daily_success_percent REAL
@@ -152,7 +200,7 @@ def initialize_trade_summary_file(trades_file):
     conn.commit()
     conn.close()
 
-def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, losing_sells, daily_success_percent):
+def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_sells, losing_sells, daily_success_percent):
     """
     Writes the daily summary for trading activity into the trades table.
     The summary includes date, daily profit, total winning sells, total losing sells, and daily success percent.
@@ -160,82 +208,61 @@ def write_daily_summary_to_db(trades_file, date, daily_profit, winning_sells, lo
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
 
-    # Insert the new columns for date, profit, winning_sells, losing_sells, and daily success percentage
-    c.execute(f"INSERT INTO {symbol}_trades (date, profit, winning_sells, losing_sells, daily_success_percent) VALUES (?, ?, ?, ?, ?)",
+    # Insert the new columns for date, daily_profit, winning_sells, losing_sells, and daily success percentage
+    c.execute(f"INSERT INTO {symbol}_trades (date, daily_profit, winning_sells, losing_sells, daily_success_percent) VALUES (?, ?, ?, ?, ?)",
               (date, daily_profit, winning_sells, losing_sells, daily_success_percent))
 
     conn.commit()
     conn.close()
 
+def simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
+    # Initialize tracking variables
+    total_cash = initial_cash  # Shared cash across all stocks
+    stock_data = {symbol: {'shares': 0, 'purchase_history': []} for symbol in symbols}
+    trade_data = {symbol: {'total_trades': 0, 'daily_profit': 0, 'winning_sells': 0, 'losing_sells': 0} for symbol in symbols}
 
-def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash):
-    # Step 1: Create a single database covering from start_date to simulate_end_date
-    full_db_path = get_db_path(symbol, start_date, simulate_end_date, interval)
-    if not database_exists(full_db_path):
-        print(f"Database for {symbol} does not exist. Creating database from {start_date} to {simulate_end_date}...")
-        create_database(symbol, start_date, simulate_end_date, interval)
-
-        indicator_states = ['   ', '.  ', '.. ', '...']
-        indicator_index = 0
-
-        while not (database_exists(full_db_path) and check_db_populated(full_db_path)):
-            sys.stdout.write(f"\rWaiting for database to be populated{indicator_states[indicator_index]}")
-            sys.stdout.flush()
-            time.sleep(1)
-            indicator_index = (indicator_index + 1) % len(indicator_states)
-
-        sys.stdout.write("\rDatabase populated.                              \n")
-
-    # Step 2: Calculate initial bands using historical data up to the day before the simulation starts
-    historical_db_conn = sqlite3.connect(full_db_path)
-    historical_cursor = historical_db_conn.cursor()
-    historical_cursor.execute("SELECT stock_price FROM stock_prices WHERE price_date BETWEEN ? AND ? ORDER BY price_date, price_time",
-                              (start_date, simulate_start_date))
-    historical_prices = [row[0] for row in historical_cursor.fetchall()]
-    historical_db_conn.close()
-
-    if len(historical_prices) < 14:  # Ensure we have at least 14 days of data
-        print("Not enough historical data to calculate initial bands.")
-        return
-
-    # Calculate initial bands using historical data with weighted average
-    lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices, window=14)
-
-    # Step 3: Simulate trading using minute-by-minute data from the current day onwards
-    simulate_db_conn = sqlite3.connect(full_db_path)
-    simulate_cursor = simulate_db_conn.cursor()
-
-    # Set the new file names for equity and trades tracking
-    equity_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/equity.db')
+    # Create tables for each stock in trades.db and initialize the equity file
     trades_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/trades.db')
-
-    # Clear and initialize the equity and trades files
-    clear_trade_data_file(equity_file)
-    initialize_equity_file(equity_file)
+    equity_file = os.path.join(os.path.dirname(__file__), '../data/tradeData/equity.db')
     clear_trade_data_file(trades_file)
-    initialize_trade_summary_file(trades_file)
+    clear_trade_data_file(equity_file)
 
-    last_trade_data = get_last_trade_data(equity_file)
-    if last_trade_data:
-        cash, shares, equity = last_trade_data
-    else:
-        cash = initial_cash
-        shares = 0
+    for symbol in symbols:
+        initialize_trade_summary_file(trades_file, symbol)
+    initialize_equity_file(equity_file)
 
-    # Initialize variables to track buy/sell cycles
-    purchase_history = []  # Track (price, quantity) for each buy trade
-    total_trades = 0  # Track total number of trades made
-    daily_profit = 0  # Track profit for the day
+    # Create a single database for each stock and calculate initial bands
+    initial_bands = {}
+    for symbol in symbols:
+        full_db_path = get_db_path(symbol, start_date, simulate_end_date, interval)
+        if not database_exists(full_db_path):
+            print(f"Database for {symbol} does not exist. Creating database from {start_date} to {simulate_end_date}...")
+            create_database(symbol, start_date, simulate_end_date, interval)
+
+            # Wait for database to populate
+            indicator_states = ['   ', '.  ', '.. ', '...']
+            indicator_index = 0
+            while not (database_exists(full_db_path) and check_db_populated(full_db_path)):
+                sys.stdout.write(f"\rWaiting for {symbol} database to be populated{indicator_states[indicator_index]}")
+                sys.stdout.flush()
+                time.sleep(1)
+                indicator_index = (indicator_index + 1) % len(indicator_states)
+
+            sys.stdout.write(f"\rDatabase for {symbol} populated.                              \n")
+
+        # Calculate initial bands using historical data up to the simulation start date for each symbol
+        historical_prices = get_historical_prices(full_db_path, start_date, simulate_start_date)
+        if len(historical_prices) < 14:  # Ensure we have at least 14 days of data for Bollinger Bands
+            print(f"Not enough historical data to calculate initial bands for {symbol}.")
+            return
+        lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices, window=14)
+        initial_bands[symbol] = (lower_band, weighted_moving_average, upper_band)
+
+    # Step 2: Simulate trading for each minute using minute-by-minute data from the current day onwards for all symbols
+    simulate_db_conn = {symbol: sqlite3.connect(get_db_path(symbol, start_date, simulate_end_date, interval)) for symbol in symbols}
+    simulate_cursor = {symbol: simulate_db_conn[symbol].cursor() for symbol in symbols}
 
     current_date = simulate_start_date
-    prev_closing_equity = cash
-    missing_dates = []  # Track missing dates
-
-    # Variables to track daily and cumulative performance
-    winning_sells = 0  # Track total value of profitable sells for the day
-    losing_sells = 0  # Track total value of unprofitable sells for the day
-    max_shares_per_trade = 10  # Set a cap for max shares to buy in one trade to avoid over-leveraging
-
     while current_date <= simulate_end_date:
         current_date_dt = datetime.strptime(current_date, '%Y-%m-%d')
 
@@ -243,110 +270,115 @@ def simulate_trading(symbol, start_date, end_date, interval, simulate_start_date
             current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
             continue
 
-        simulate_cursor.execute("SELECT stock_price, volume, price_date, price_time FROM stock_prices WHERE price_date = ? ORDER BY price_time",
-                                (current_date,))
-        stock_data = simulate_cursor.fetchall()
+        # Fetch data for each symbol
+        stock_prices_per_minute = {}
+        for symbol in symbols:
+            simulate_cursor[symbol].execute("SELECT stock_price, volume, price_date, price_time FROM stock_prices WHERE price_date = ? ORDER BY price_time",
+                                            (current_date,))
+            stock_data_for_symbol = simulate_cursor[symbol].fetchall()
+            if not stock_data_for_symbol:
+                continue
+            stock_prices_per_minute[symbol] = stock_data_for_symbol
 
-        if not stock_data:
-            # Collect missing date
-            missing_dates.append(current_date_dt)
-            current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
-            continue
+        # Determine the best stock to buy for the current minute based on buy quality
+        best_stock = None
+        best_buy_quality = 0
+        for symbol, stock_info in stock_prices_per_minute.items():
+            price = stock_info[0][0]  # Get the current minute price for the symbol
+            lower_band, _, upper_band = initial_bands[symbol]
 
-        # Reset daily statistics at the start of each day
-        daily_profit = 0
-        winning_sells = 0
-        losing_sells = 0
-
-        # Track purchase details for profit calculation
-        for price, volume, date, time_ in stock_data:
-            # Calculate Buy Quality based on how far the price is from the lower band
+            # Determine buy quality based on how far the price is from the lower band
             buy_quality = 1 + ((lower_band - price) / lower_band)
+            if buy_quality > best_buy_quality:
+                best_buy_quality = buy_quality
+                best_stock = symbol
 
-            # Determine the number of shares to buy dynamically based on Buy Quality
-            shares_to_buy = int(min(max_shares_per_trade, buy_quality * (cash // price)))  # Ensure integer shares
+        # Execute buy/sell decisions for the selected stock
+        if best_stock:
+            for price, volume, date, time_ in stock_prices_per_minute[best_stock]:
+                lower_band, _, upper_band = initial_bands[best_stock]
 
-            # Check buy/sell decision before updating bands with the new minute's price
-            if price <= lower_band and cash >= price:
-                if shares_to_buy > 0:  # Only proceed if shares to buy is greater than 0
-                    shares += shares_to_buy
-                    cash_spent = shares_to_buy * price
-                    cash -= cash_spent
+                # Buy decision: when the price is below or equal to the lower band and we have cash
+                if price <= lower_band and total_cash >= price:
+                    shares_to_buy = int(total_cash // price)
+                    if shares_to_buy > 0:
+                        # Update cash and shares for the selected stock
+                        stock_data[best_stock]['shares'] += shares_to_buy
+                        cash_spent = shares_to_buy * price
+                        total_cash -= cash_spent
+                        stock_data[best_stock]['purchase_history'].append((price, shares_to_buy))
+                        trade_data[best_stock]['total_trades'] += 1
+                        print(f"Bought {shares_to_buy} shares of {best_stock} at {price}, cash remaining: {total_cash}")
 
-                    # Track the purchase in history
-                    purchase_history.append((price, shares_to_buy))
+                # Sell decision: when the price is above or equal to the upper band and we have shares to sell
+                elif price >= upper_band and stock_data[best_stock]['shares'] > 0:
+                    shares_to_sell = stock_data[best_stock]['shares']
+                    cash_gained = shares_to_sell * price
+                    profit = cash_gained - sum([p * q for p, q in stock_data[best_stock]['purchase_history']])  # Calculate profit based on purchase history
 
-                    total_trades += 1  # Increment trade count for buy
+                    total_cash += cash_gained
+                    stock_data[best_stock]['shares'] = 0
+                    stock_data[best_stock]['purchase_history'] = []  # Reset purchase history after selling
+                    trade_data[best_stock]['daily_profit'] += profit
 
-            elif price >= upper_band and shares > 0:
-                # Sell logic: Sell all held shares
-                cash_gained = shares * price
+                    # Update winning/losing sells based on profit
+                    if profit > 0:
+                        trade_data[best_stock]['winning_sells'] += profit
+                    else:
+                        trade_data[best_stock]['losing_sells'] += profit
 
-                # Calculate profit based on cumulative purchase history
-                total_buy_cost = sum([qty * p for p, qty in purchase_history])  # Sum of all buy costs
-                profit = cash_gained - total_buy_cost  # Calculate profit
+                    trade_data[best_stock]['total_trades'] += 1
+                    print(f"Sold {shares_to_sell} shares of {best_stock} at {price}, cash after sell: {total_cash}")
 
-                # Update cash and clear shares and purchase history
-                cash += cash_gained
-                purchase_history.clear()  # Clear purchase history after sell
-                shares = 0
+                # Update bands for the next minute using the new price
+                historical_prices.append(price)
+                lower_band, _, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)
+                initial_bands[best_stock] = (lower_band, _, upper_band)
 
-                daily_profit += profit  # Update daily profit
+        # Calculate combined end-of-day equity for all stocks
+        combined_equity = total_cash
+        for symbol in symbols:
+            if stock_data[symbol]['shares'] > 0:
+                # Get the closing price for this stock on the current day
+                closing_price = stock_prices_per_minute.get(symbol, [(None, None, None, None)])[-1][0]
+                if closing_price:
+                    combined_equity += stock_data[symbol]['shares'] * closing_price
 
-                # Update winning/losing sells based on profit
-                if profit > 0:
-                    winning_sells += profit  # Add to winning sells
-                else:
-                    losing_sells += profit  # Add to losing sells
+        # Write end-of-day summary entry for each symbol
+        for symbol in symbols:
+            daily_profit = trade_data[symbol]['daily_profit']
+            winning_sells = trade_data[symbol]['winning_sells']
+            losing_sells = trade_data[symbol]['losing_sells']
 
-                total_trades += 1  # Increment trade count for sell
+            total_sells_value = winning_sells + abs(losing_sells)
+            daily_success_percent = (winning_sells - abs(losing_sells)) / total_sells_value * 100 if total_sells_value > 0 else 0
 
-            # Now update bands using the new price for the next minute
-            historical_prices.append(price)  # Include this minute's price in historical prices
-            lower_band, weighted_moving_average, upper_band = calculate_weighted_bollinger_bands(historical_prices[-14:], window=14)  # Recalculate with new price
+            write_daily_summary_to_db(trades_file, symbol, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent)
 
-        # Calculate the success percentage for the day
-        total_sells_value = winning_sells + abs(losing_sells)
-        if total_sells_value > 0:
-            daily_success_percent = (winning_sells - abs(losing_sells)) / total_sells_value * 100
-        else:
-            daily_success_percent = 0
-
-        # Write a single summary entry for the day in `trades.db`
-        write_daily_summary_to_db(trades_file, current_date, daily_profit, winning_sells, losing_sells, daily_success_percent)
-
-        # Write end-of-day equity data
-        ending_price = stock_data[-1][0]
-        equity = cash + (shares * ending_price)
-        prev_closing_equity = equity
-
-        write_equity_to_db(equity_file, current_date, cash, shares, equity)
+        # Write combined equity into `equity.db` at the end of the day
+        write_equity_to_db(equity_file, current_date, total_cash, combined_equity)
 
         current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    print(f"Total Trades Executed: {total_trades}")
+    # Final report
+    print(f"Total Trades Executed: {sum(trade_data[symbol]['total_trades'] for symbol in symbols)}")
 
-    # Calculate the average daily success percentage from `trades.db`
+    # Display average daily success percentage for each symbol
     conn = sqlite3.connect(trades_file)
     c = conn.cursor()
-    c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades")
-    avg_success_percentage = c.fetchone()[0]
+    for symbol in symbols:
+        c.execute(f"SELECT AVG(daily_success_percent) FROM {symbol}_trades")
+        avg_success_percentage = c.fetchone()[0]
+        print(f"Average Daily Success Percentage for {symbol}: {avg_success_percentage:.2f}%")
     conn.close()
 
-    print(f"Average Daily Success Percentage: {avg_success_percentage:.2f}%")
-
-    total_equity = cash + (shares * ending_price)
-    total_returns = ((total_equity - initial_cash) / initial_cash) * 100
-
-    print(f"Final Equity: {total_equity}")
-    print(f"Total Percentage Returns: {total_returns}%")
-
-
+# Parsing and handling multiple symbols correctly
 if len(sys.argv) != 10:
-    print("Usage: python tradeSimulator.py <symbol> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash> <initial_period_length>")
+    print("Usage: python tradeSimulator.py <symbols> <start_date> <end_date> <interval> <simulate_start_date> <simulate_end_date> <threshold> <initial_cash> <initial_period_length>")
     sys.exit(1)
 
-symbol = sys.argv[1].upper()
+# Parse symbols as a list
+symbols = sys.argv[1].upper().split(",")  # Split the symbols string into a list
 start_date = sys.argv[2].strip()
 end_date = sys.argv[3].strip()
 interval = sys.argv[4].strip()
@@ -356,4 +388,4 @@ threshold = float(sys.argv[7].strip())
 initial_cash = float(sys.argv[8].strip())
 initial_period_length = int(sys.argv[9].strip())
 
-simulate_trading(symbol, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash)
+simulate_trading(symbols, start_date, end_date, interval, simulate_start_date, simulate_end_date, threshold, initial_cash)
