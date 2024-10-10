@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Finance Chart</title>
+    <style>
+        body {
+            background-color: #1e1e1e;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: flex-start;
+            height: 100vh;
+        }
+        #chart-container {
+            width: 800px;
+            height: 600px;
+            margin-right: 20px;
+            position: relative;
+        }
+        #control-panel {
+            width: 300px;
+            padding: 20px;
+            background-color: #2e2e2e;
+            border-radius: 10px;
+        }
+        .axis path,
+        .axis line {
+            fill: none;
+            stroke: #ffffff;
+        }
+        .axis text {
+            fill: #ffffff;
+        }
+        #zoom-controls {
+            position: absolute;
+            left: 50%;
+            transform: translate(-50%, -100%);  /* Moves the controls up relative to their default position */
+            bottom: 40px;  /* Moves the controls higher up */
+            z-index: 10;
+        }
+        #zoom-controls button {
+            background-color: #4a4a4a;
+            border: 1px solid #ffffff;
+            color: #ffffff;
+            padding: 5px 10px;
+            cursor: pointer;
+            margin: 2px;
+        }
+        #zoom-controls button:hover {
+            background-color: #6a6a6a;
+        }
+    </style>
+</head>
+<body>
+<div id="chart-container">
+    <div id="zoom-controls">
+        <button id="zoom-in">+</button>
+        <button id="zoom-out">-</button>
+    </div>
+    <svg id="chart"></svg>
+</div>
+<div id="control-panel">
+    <h3>Chart Controls</h3>
+    <form id="chart-form">
+        <div>
+            <label for="start_date">Start Date:</label>
+            <input type="date" id="start_date" name="start_date" value="2024-11-01">
+        </div>
+        <div>
+            <label for="end_date">End Date:</label>
+            <input type="date" id="end_date" name="end_date" value="2024-11-07">
+        </div>
+        <div>
+            <label for="starting_balance">Starting Balance:</label>
+            <input type="number" id="starting_balance" name="starting_balance" value="1000">
+        </div>
+        <button type="submit">Update Chart</button>
+    </form>
+</div>
+
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<script>
+    // Parse the initial data from the Flask backend
+    const initialData = {{ initial_data|safe }};
+
+    // Set up chart dimensions and margins
+    const margin = { top: 20, right: 20, bottom: 50, left: 50 },
+        width = 800 - margin.left - margin.right,
+        height = 600 - margin.top - margin.bottom;
+
+    const parseDate = d3.timeParse("%Y-%m-%d");
+
+    // Create scales for x and y axes
+    const x = d3.scaleTime().range([0, width]);
+    const y = d3.scaleLinear().range([height, 0]);
+
+    // Create the line generator function
+    const line = d3.line()
+        .x(d => x(d.date))
+        .y(d => y(d.balance));
+
+    // Create the SVG container
+    const svg = d3.select("#chart")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Initial zoom levels (minute, hour, day, week, month, year, 3 years, 5 years, all time)
+    const zoomLevels = [
+        { name: "minute", value: d3.timeMinute.every(1), tickCount: width / 20 },  // Tick count is based on width
+        { name: "hour", value: d3.timeHour.every(1), tickCount: width / 40 },
+        { name: "day", value: d3.timeDay.every(1), tickCount: width / 60 },
+        { name: "week", value: d3.timeWeek.every(1), tickCount: width / 100 },
+        { name: "month", value: d3.timeMonth.every(1), tickCount: width / 150 },
+        { name: "year", value: d3.timeYear.every(1), tickCount: width / 300 },
+        { name: "3 years", value: d3.timeYear.every(3), tickCount: 6 },
+        { name: "5 years", value: d3.timeYear.every(5), tickCount: 5 },
+        { name: "all time", value: null, tickCount: 4 } // For all time, set minimal ticks
+    ];
+
+    let currentZoomLevelIndex = 2;  // Default to "day" zoom level
+
+    // Convert the initial data
+    let data = initialData.map(d => ({ date: parseDate(d.date), balance: d.balance }));
+
+    // Set the domains for the axes
+    x.domain(d3.extent(data, d => d.date));
+    y.domain([0, d3.max(data, d => d.balance)]);
+
+    // Add x-axis
+    const xAxis = svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x).ticks(zoomLevels[currentZoomLevelIndex].value).tickSizeOuter(0).tickFormat(d3.timeFormat("%H:%M %b %d")));
+
+    // Add y-axis
+    svg.append("g")
+        .call(d3.axisLeft(y));
+
+    // Add the line path
+    svg.append("path")
+        .data([data])
+        .attr("class", "line")
+        .attr("d", line)
+        .style("fill", "none")
+        .style("stroke", "#228be6")
+        .style("stroke-width", 2);
+
+    // Zoom in and Zoom out buttons functionality
+    document.getElementById('zoom-in').addEventListener('click', () => {
+        if (currentZoomLevelIndex > 0) {
+            currentZoomLevelIndex -= 1;
+            updateZoomLevel();
+        }
+    });
+
+    document.getElementById('zoom-out').addEventListener('click', () => {
+        if (currentZoomLevelIndex < zoomLevels.length - 1) {
+            currentZoomLevelIndex += 1;
+            updateZoomLevel();
+        }
+    });
+
+    // Function to update the zoom level on the x-axis
+    function updateZoomLevel() {
+        // Remove and re-draw the x-axis with new tick intervals
+        xAxis.call(d3.axisBottom(x).ticks(zoomLevels[currentZoomLevelIndex].value).tickSizeOuter(0).tickFormat(d3.timeFormat(getTickFormat(currentZoomLevelIndex))));
+
+        // Update the line path with new x-scale
+        svg.selectAll(".line").remove();
+        svg.append("path")
+            .data([data])
+            .attr("class", "line")
+            .attr("d", line)
+            .style("fill", "none")
+            .style("stroke", "#228be6")
+            .style("stroke-width", 2);
+    }
+
+    // Get appropriate tick format based on the current zoom level
+    function getTickFormat(zoomIndex) {
+        if (zoomLevels[zoomIndex].name === "minute") return "%H:%M";
+        if (zoomLevels[zoomIndex].name === "hour") return "%H:%M %p";
+        if (zoomLevels[zoomIndex].name === "day") return "%b %d";
+        if (zoomLevels[zoomIndex].name === "week" || zoomLevels[zoomIndex].name === "month") return "%b %d";
+        if (zoomLevels[zoomIndex].name.includes("year")) return "%Y";
+        return "%b %d, %Y";  // Default format
+    }
+
+    // Handle form submission to update chart
+    document.getElementById('chart-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        // Get form data
+        const formData = new FormData(event.target);
+        const startDate = formData.get('start_date');
+        const endDate = formData.get('end_date');
+        const startingBalance = formData.get('starting_balance');
+
+        // Fetch updated data from the Flask backend
+        fetch('/update_data', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(newData => {
+                // Parse new data and update chart
+                data = newData.map(d => ({ date: parseDate(d.date), balance: d.balance }));
+                x.domain(d3.extent(data, d => d.date));
+                y.domain([0, d3.max(data, d => d.balance)]);
+                updateZoomLevel();
+            });
+    });
+</script>
+</body>
+</html>
