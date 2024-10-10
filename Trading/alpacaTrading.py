@@ -3,12 +3,14 @@ import json
 import boto3
 import yfinance as yf
 from datetime import datetime, timedelta
-import alpaca_trade_api as tradeapi  # Requires 'alpaca-trade-api' library
+import alpaca_trade_api as tradeapi  # Ensure you have the `alpaca-trade-api` library installed
 
 # Alpaca API keys and base URL
 APCA_API_KEY_ID = os.getenv("APCA_API_KEY_ID")
 APCA_API_SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
-APCA_API_BASE_URL = "https://paper-api.alpaca.markets"
+APCA_API_BASE_URL = "https://paper-api.alpaca.markets/v2"  # Updated to the correct endpoint
+
+# Initialize the Alpaca API client with the new base URL
 alpaca_api = tradeapi.REST(APCA_API_KEY_ID, APCA_API_SECRET_KEY, base_url=APCA_API_BASE_URL)
 
 # DynamoDB setup
@@ -16,6 +18,7 @@ dynamodb = boto3.resource('dynamodb')
 DYNAMODB_TABLE_NAME = 'StockDataTable'
 table = dynamodb.Table(DYNAMODB_TABLE_NAME)
 
+# Function to get Alpaca cash balance
 def get_alpaca_cash_balance():
     """
     Retrieves the current cash balance from the Alpaca account.
@@ -28,79 +31,78 @@ def get_alpaca_cash_balance():
         print(f"Error retrieving cash balance from Alpaca: {e}")
         return 0.0
 
-def save_minute_data_to_dynamodb(symbol, price, volume, timestamp):
+# Function to save data to DynamoDB
+def save_data_to_dynamodb(symbol, timestamp, data):
     """
-    Save the minute-by-minute price and volume data to DynamoDB for a given symbol.
+    Save the dictionary data to DynamoDB for a given symbol and timestamp.
     :param symbol: Stock symbol (primary key)
-    :param price: Stock price at the given timestamp
-    :param volume: Stock trading volume at the given timestamp
-    :param timestamp: Timestamp (sort key) in 'YYYY-MM-DD HH:MM' format
+    :param timestamp: The timestamp for the stock data (sort key)
+    :param data: Dictionary to be saved as the item for the given symbol and timestamp
     """
     try:
         table.put_item(
             Item={
-                'symbol': symbol,  # Partition key
-                'timestamp': timestamp,  # Sort key
-                'price': price,
-                'volume': volume
+                'symbol': symbol,
+                'timestamp': timestamp,
+                'price': data['prices'][-1],  # Latest price
+                'volume': data.get('volume', 0),  # Volume of the stock
+                'shares': data['shares'],
+                'purchase_history': json.dumps(data['purchase_history']),  # Serialize purchase history
+                'daily_profit': data['daily_profit'],
+                'winning_sells': data['winning_sells'],
+                'losing_sells': data['losing_sells']
             }
         )
         print(f"Successfully saved data for {symbol} at {timestamp} to DynamoDB.")
     except Exception as e:
-        print(f"Error saving data to DynamoDB for {symbol}: {e}")
+        print(f"Error saving data to DynamoDB for {symbol} at {timestamp}: {e}")
 
-def load_14_day_data_from_dynamodb(symbol):
+
+# Function to load data from DynamoDB
+def load_data_from_dynamodb(symbol):
     """
-    Load the last 14 days of minute-by-minute data from DynamoDB for a given symbol.
+    Load the dictionary data from DynamoDB for a given symbol.
     :param symbol: Stock symbol (primary key)
-    :return: List of prices over the last 14 days
+    :return: Loaded dictionary or an empty list if no data is found
     """
     try:
-        # Calculate the start date for the 14-day window
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=14)
-        start_timestamp = start_date.strftime('%Y-%m-%d %H:%M')
-        end_timestamp = end_date.strftime('%Y-%m-%d %H:%M')
-
-        # Query DynamoDB for all items between start_timestamp and end_timestamp
-        response = table.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('symbol').eq(symbol) &
-                                   boto3.dynamodb.conditions.Key('timestamp').between(start_timestamp, end_timestamp)
-        )
-
-        # Extract and return the price values
-        prices = [item['price'] for item in response.get('Items', [])]
-        print(f"Loaded {len(prices)} data points for {symbol} from DynamoDB.")
-        return prices
+        response = table.get_item(Key={'symbol': symbol})
+        if 'Item' in response:
+            return json.loads(response['Item']['data'])  # Parse the JSON string back to a dictionary
+        else:
+            print(f"No data found for {symbol} in DynamoDB. Initializing new data store.")
+            return {"prices": [], "shares": 0, "purchase_history": [], "daily_profit": 0, "winning_sells": 0, "losing_sells": 0}
     except Exception as e:
         print(f"Error loading data from DynamoDB for {symbol}: {e}")
-        return []
+        return {"prices": [], "shares": 0, "purchase_history": [], "daily_profit": 0, "winning_sells": 0, "losing_sells": 0}
 
-def update_data_with_yfinance(symbol, interval='1m'):
+# Function to update data with yfinance
+def update_data_with_yfinance(symbol, stock_data, interval='1m'):
     """
     Update the stock data dictionary with the latest real-time minute-by-minute data from yfinance.
     :param symbol: Stock symbol
+    :param stock_data: Dictionary storing historical and real-time data
     :param interval: Time interval for yfinance data (default is '1m' for minute-by-minute)
     """
     # Fetch the most recent minute-by-minute data
     ticker = yf.Ticker(symbol)
     new_data = ticker.history(period="1d", interval=interval)
     if not new_data.empty:
-        latest_minute = new_data.index[-1].strftime('%Y-%m-%d %H:%M')
+        latest_minute = new_data.index[-1].strftime('%Y-%m-%d %H:%M:%S')
         latest_price = new_data['Close'].iloc[-1]
-        latest_volume = new_data['Volume'].iloc[-1]
 
-        # Save the new data to DynamoDB
-        save_minute_data_to_dynamodb(symbol, latest_price, latest_volume, latest_minute)
-
+        # Append the new data and maintain only the last 14 days of minute-by-minute data
+        stock_data['prices'].append(latest_price)
+        stock_data['prices'] = stock_data['prices'][-1440 * 14:]  # Keep last 14 days of minute data
         print(f"Updated {symbol} data with yfinance. Latest price: {latest_price} at {latest_minute}")
 
+# Function to handle trading with Alpaca
 def trade_with_alpaca(symbols, threshold=0.1):
     """
     Executes trading strategy using Alpaca API for real-time trading, similar to the simulate_trading method.
     """
     # Load initial stock data from DynamoDB
-    stock_data = {symbol: {'prices': load_14_day_data_from_dynamodb(symbol), 'shares': 0, 'purchase_history': [], 'daily_profit': 0} for symbol in symbols}
+    stock_data = {symbol: load_data_from_dynamodb(symbol) for symbol in symbols}
 
     # Retrieve the current cash balance from Alpaca
     total_cash = get_alpaca_cash_balance()
@@ -110,7 +112,7 @@ def trade_with_alpaca(symbols, threshold=0.1):
 
     # Update the stock data with the latest prices using yfinance
     for symbol in symbols:
-        update_data_with_yfinance(symbol)
+        update_data_with_yfinance(symbol, stock_data[symbol])
 
     # Calculate Bollinger Bands for each symbol
     initial_bands = {}
@@ -164,6 +166,9 @@ def trade_with_alpaca(symbols, threshold=0.1):
                 stock_data[symbol]['purchase_history'].append((current_price, shares_to_buy))
 
                 print(f"Bought {shares_to_buy} shares of {symbol} at {current_price}. Cash Remaining: {total_cash}")
+
+        # Save updated stock data to DynamoDB
+        save_data_to_dynamodb(symbol, stock_data[symbol])
 
 if __name__ == "__main__":
     # Define symbols and execute the trading strategy
