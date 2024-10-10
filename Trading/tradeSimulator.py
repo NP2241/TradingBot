@@ -176,7 +176,6 @@ def write_daily_summary_to_db(trades_file, symbol, date, daily_profit, winning_s
 
     conn.commit()
     conn.close()
-    print(f"Written daily summary for {symbol} on {date} into trades.db")  # Debug print statement
 
 def initialize_equity_file(equity_file):
     """
@@ -315,8 +314,8 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 min_profit_margin = 0.05 / 100  # 0.05% minimum profit margin
 
                 # --- SELL LOGIC ---
-                # Sell decision: when the price is above or equal to the upper band
-                if price >= upper_band and stock_data[symbol]['shares'] > 0:
+                # Sell decision: when the price is above or near the upper band based on the threshold
+                if price >= (upper_band * (1 - threshold / 100)) and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
                     if shares_to_sell > 0:
                         cash_gained = round(shares_to_sell * price, 2)
@@ -347,8 +346,8 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                             trade_data[symbol]['total_trades'] += 1
 
                 # --- BUY LOGIC ---
-                # Check available cash before buying to prevent negative cash balance
-                if price <= lower_band and total_cash >= price:  # Ensure that total_cash (not equity) is used for buy check
+                # Buy decision: when the price is below or near the lower band based on the threshold
+                if price <= (lower_band * (1 + threshold / 100)) and total_cash >= price:
                     shares_to_buy = int(total_cash // price)  # Calculate the number of shares we can afford
                     if shares_to_buy > 0:
                         stock_data[symbol]['shares'] += shares_to_buy
@@ -401,8 +400,6 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
         # Move to the next day
         current_date = (current_date_dt + timedelta(days=1)).strftime('%Y-%m-%d')
 
-
-
     # Final report
     total_trades_executed = sum(trade_data[symbol]['total_trades'] for symbol in symbols)
     print(f"Total Trades Executed: {total_trades_executed:,}")
@@ -432,8 +429,6 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
     print(f"Overall Percentage Returns: {overall_percentage_returns:,.2f}%")
     print(f"Overall Total Profit: {combined_equity - starting_equity:,.2f}")
     conn.close()
-
-
 
 # Parsing and handling multiple symbols correctly
 if len(sys.argv) != 10:
