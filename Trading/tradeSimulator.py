@@ -313,9 +313,27 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                 min_loss_tolerance = -3 / 100  # 3% loss tolerance
                 min_profit_margin = 0.05 / 100  # 0.05% minimum profit margin
 
+                # Calculate time-based threshold adjustments (Suggestion 4)
+                hour_of_day = datetime.strptime(time_, '%I:%M:%S %p').hour
+                if hour_of_day < 11 or hour_of_day >= 15:  # Early morning or late afternoon
+                    dynamic_threshold = threshold * 1.5  # Increase threshold to allow wider bands
+                else:
+                    dynamic_threshold = threshold  # Use default threshold during midday
+
+                # Calculate relative position-based threshold adjustments (Suggestion 5)
+                if price < lower_band:
+                    dynamic_threshold *= 1.1  # If price is below the lower band, increase the threshold for buys
+                elif price > upper_band:
+                    dynamic_threshold *= 1.1  # If price is above the upper band, increase the threshold for sells
+
+                # Calculate dynamic sizing based on distance from bands (Suggestion 6)
+                # More shares are bought when closer to the lower band, and fewer shares are bought when farther away.
+                distance_from_band = abs(price - lower_band) / (upper_band - lower_band)
+                dynamic_buy_size = max(1, int((1 - distance_from_band) * (total_cash // price)))  # Adjust share size based on proximity to band
+
                 # --- SELL LOGIC ---
-                # Sell decision: when the price is above or near the upper band based on the threshold
-                if price >= (upper_band * (1 - threshold / 100)) and stock_data[symbol]['shares'] > 0:
+                # Sell decision: when the price is above or near the upper band based on the adjusted dynamic threshold
+                if price >= (upper_band * (1 - dynamic_threshold / 100)) and stock_data[symbol]['shares'] > 0:
                     shares_to_sell = stock_data[symbol]['shares']
                     if shares_to_sell > 0:
                         cash_gained = round(shares_to_sell * price, 2)
@@ -346,9 +364,9 @@ def simulate_trading(symbols, start_date, end_date, interval, simulate_start_dat
                             trade_data[symbol]['total_trades'] += 1
 
                 # --- BUY LOGIC ---
-                # Buy decision: when the price is below or near the lower band based on the threshold
-                if price <= (lower_band * (1 + threshold / 100)) and total_cash >= price:
-                    shares_to_buy = int(total_cash // price)  # Calculate the number of shares we can afford
+                # Buy decision: when the price is below or near the lower band based on the adjusted dynamic threshold
+                if price <= (lower_band * (1 + dynamic_threshold / 100)) and total_cash >= price:
+                    shares_to_buy = min(dynamic_buy_size, int(total_cash // price))  # Use dynamic buy size
                     if shares_to_buy > 0:
                         stock_data[symbol]['shares'] += shares_to_buy
                         cash_spent = round(shares_to_buy * price, 2)
