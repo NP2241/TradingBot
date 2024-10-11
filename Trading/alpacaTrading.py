@@ -188,7 +188,20 @@ def trade_with_alpaca(symbols, threshold=0.1):
         # Save updated stock data to DynamoDB with timestamp
         save_data_to_dynamodb(symbol, timestamp, stock_data[symbol])
 
-if __name__ == "__main__":
-    # Define symbols and execute the trading strategy
+# Add the temporary test function here
+def test_alpaca_connection():
+    try:
+        account = alpaca_api.get_account()
+        print(f"Connected to Alpaca! Account cash balance: {account.cash}")
+    except Exception as e:
+        print(f"Failed to connect to Alpaca: {e}")
+
+# Lambda handler function
+def lambda_handler(event, context):
+    # Run the Alpaca connection test before the main trading logic
+    test_alpaca_connection()
+
     symbols = ["AAPL", "AMZN", "NFLX", "GOOGL", "META"]
     trade_with_alpaca(symbols)
+    return {"statusCode": 200, "body": json.dumps("Trading completed successfully.")}
+
